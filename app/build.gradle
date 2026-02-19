@@ -44,7 +44,7 @@ android {
         android.applicationVariants.all { variant ->
             variant.outputs.all { output ->
                 def builtType = variant.buildType.name
-                outputFileName = "Mupen64PlusAE-${builtType}.apk"
+                outputFileName = "${variant.applicationId}-${builtType}.apk"
             }
         }
     }

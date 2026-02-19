@@ -1,7 +1,7 @@
 apply from: '../build_common/native_common.gradle'
 
 android {
-    namespace = "org.mupen64plusae.v3.alpha"
+    namespace = "org.mupen64plusae.lib.ae_bridge"
 
     packagingOptions {
         jniLibs {

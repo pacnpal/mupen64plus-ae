@@ -73,7 +73,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: mupen64plus-ae-${{ steps.var.outputs.branch }}-${{ env.SHA }}
-        path: ${{ github.workspace }}/app/build/outputs/apk/release/Mupen64PlusAE-release.apk
+        path: ${{ github.workspace }}/app/build/outputs/apk/release/*-release.apk
 
   release:
     name: Release

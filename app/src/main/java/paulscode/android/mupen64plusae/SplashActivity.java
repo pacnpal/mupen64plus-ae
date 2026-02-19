@@ -80,9 +80,6 @@ public class SplashActivity extends AppCompatActivity implements ExtractAssetsLi
     //Total number of permissions requested
     static final int NUM_PERMISSIONS = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU? 1 : 2;
 
-    /** The minimum duration that the splash screen is shown, in milliseconds. */
-    private static final int SPLASH_DELAY = 1000;
-
     /**
      * The subdirectory within the assets directory to extract. A subdirectory is necessary to avoid
      * extracting all the default system assets in addition to ours.
@@ -375,10 +372,10 @@ public class SplashActivity extends AppCompatActivity implements ExtractAssetsLi
         {
             mAppData.putAppVersion(mAppData.appVersionCode);
 
-            // Extract the assets in a separate thread and launch the menu activity
-            // Handler.postDelayed ensures this runs only after activity has resumed
+            // Extract the assets in a separate thread and launch the menu activity.
+            // Use post() to avoid introducing an artificial countdown delay.
             final Handler handler = new Handler(Looper.getMainLooper());
-            handler.postDelayed( extractAssetsTaskLauncher, SPLASH_DELAY );
+            handler.post(extractAssetsTaskLauncher);
         }
         else
         {
@@ -447,14 +444,13 @@ public class SplashActivity extends AppCompatActivity implements ExtractAssetsLi
                 RomDatabase.getInstance().setDatabaseFile(mAppData.mupen64plus_ini);
             }
 
-            // We never want to come back to this activity, so finish it
+            // We never want to come back to this activity, so finish it.
             final Handler handler = new Handler(Looper.getMainLooper());
-            long delay = failures.size() != 0 ? 5000 : 0;
-            handler.postDelayed(() -> {
+            handler.post(() -> {
                 // Launch gallery activity, passing ROM path if it was provided externally
                 ActivityHelper.startGalleryActivity( SplashActivity.this, getIntent() );
                 SplashActivity.this.finish();
-            }, delay);
+            });
         });
     }
 
