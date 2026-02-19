@@ -24,6 +24,7 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
     private final Context mContext;
     private final RCheevosNative mNative;
     private final RetroAchievementsHttpClient mHttpClient;
+    private final RetroAchievementsNotifications mNotifications;
     
     private long mClientPtr = 0;
     private boolean mInitialized = false;
@@ -58,6 +59,7 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
         mContext = context;
         mNative = new RCheevosNative();
         mHttpClient = new RetroAchievementsHttpClient();
+        mNotifications = new RetroAchievementsNotifications(context);
     }
     
     /**
@@ -110,13 +112,18 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
     }
     
     /**
-     * Enable or disable hardcore mode
+     * Set hardcore mode
      */
     public void setHardcoreEnabled(boolean enabled) {
         mHardcoreEnabled = enabled;
         if (mInitialized && mClientPtr != 0) {
             mNative.nativeSetHardcoreEnabled(mClientPtr, enabled);
             Log.i(TAG, "Hardcore mode " + (enabled ? "enabled" : "disabled"));
+            
+            // Show notification if enabling hardcore
+            if (enabled) {
+                mNotifications.showHardcoreModeActive();
+            }
         }
     }
     
@@ -183,6 +190,13 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
      */
     public boolean isLoggedIn() {
         return mUsername != null && mToken != null;
+    }
+    
+    /**
+     * Get notifications helper
+     */
+    public RetroAchievementsNotifications getNotifications() {
+        return mNotifications;
     }
     
     // ========== RCheevosCallback Implementation ==========
