@@ -31,7 +31,6 @@ import android.widget.Toast;
 import androidx.appcompat.app.AlertDialog;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceManager;
-import androidx.preference.SwitchPreferenceCompat;
 
 import paulscode.android.mupen64plusae.R;
 import paulscode.android.mupen64plusae.compat.AppCompatPreferenceActivity;
@@ -49,8 +48,8 @@ public class RetroAchievementsPrefsActivity extends AppCompatPreferenceActivity
     private AppData mAppData;
     private Preference mLoginPreference;
     private Preference mLogoutPreference;
-    private SwitchPreferenceCompat mEnabledPreference;
-    private SwitchPreferenceCompat mHardcorePreference;
+    private Preference mEnabledPreference;
+    private Preference mHardcorePreference;
 
     @Override
     protected void attachBaseContext(Context newBase) {

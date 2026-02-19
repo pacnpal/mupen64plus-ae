@@ -1018,6 +1018,7 @@
     <string name="retroachievements_token_hint">API Token</string>
     
     <string name="retroachievements_logout_title">Logout</string>
+    <string name="retroachievements_logout">Logout</string>
     <string name="retroachievements_logout_summary">Sign out of your account</string>
     <string name="retroachievements_logout_confirm">Are you sure you want to logout?</string>
     <string name="retroachievements_logout_success">Logged out successfully</string>
