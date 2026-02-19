@@ -395,16 +395,30 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
 
     void saveSlot()
     {
+        // Hardcore mode: saving is allowed (for practice), but loading is not
         mCoreInterface.emuSaveSlot();
     }
 
     void loadSlot()
     {
+        // Hardcore mode: prevent loading save states
+        if (mRetroAchievementsManager != null && mRetroAchievementsManager.isHardcoreEnabled()) {
+            Log.w(TAG, "RetroAchievements: Save state loading disabled in Hardcore mode");
+            if (mListener != null) {
+                // Could show a toast here
+            }
+            return;
+        }
         mCoreInterface.emuLoadSlot();
     }
 
     void loadState(File file)
     {
+        // Hardcore mode: prevent loading save states
+        if (mRetroAchievementsManager != null && mRetroAchievementsManager.isHardcoreEnabled()) {
+            Log.w(TAG, "RetroAchievements: Save state loading disabled in Hardcore mode");
+            return;
+        }
         mCoreInterface.emuLoadFile( file.getAbsolutePath() );
     }
 
@@ -707,15 +721,23 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
                 } else {
                     mCoreInterface.emuSetFramelimiter(mGlobalPrefs.isFramelimiterEnabled);
 
-                    for (GamePrefs.CheatSelection selection : mGamePrefs.getEnabledCheats())
-                    {
-                        if (selection.getIndex() < mCheats.size()) {
-                            CheatUtils.Cheat cheatText = mCheats.get(selection.getIndex());
-                            ArrayList<CoreTypes.m64p_cheat_code> cheats = getCheat(cheatText, selection.getOption());
-                            if (!cheats.isEmpty()) {
-                                mCoreInterface.coreAddCheat(cheatText.name, cheats);
+                    // Hardcore mode: disable cheats
+                    boolean hardcoreEnabled = mRetroAchievementsManager != null && 
+                                            mRetroAchievementsManager.isHardcoreEnabled();
+
+                    if (!hardcoreEnabled) {
+                        for (GamePrefs.CheatSelection selection : mGamePrefs.getEnabledCheats())
+                        {
+                            if (selection.getIndex() < mCheats.size()) {
+                                CheatUtils.Cheat cheatText = mCheats.get(selection.getIndex());
+                                ArrayList<CoreTypes.m64p_cheat_code> cheats = getCheat(cheatText, selection.getOption());
+                                if (!cheats.isEmpty()) {
+                                    mCoreInterface.coreAddCheat(cheatText.name, cheats);
+                                }
                             }
                         }
+                    } else {
+                        Log.i(TAG, "RetroAchievements: Cheats disabled in Hardcore mode");
                     }
                 }
 
