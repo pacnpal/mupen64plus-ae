@@ -33,6 +33,9 @@
                 android:id="@+id/menuItem_categoryData"
                 android:title="@string/categoryData_title"/>
             <item
+                android:id="@+id/menuItem_categoryRetroAchievements"
+                android:title="@string/retroachievements_title"/>
+            <item
                 android:id="@+id/menuItem_categoryNetplay"
                 android:title="@string/categoryNetplay_title"/>
         </menu>

@@ -812,6 +812,9 @@ public class GalleryActivity extends AppCompatActivity implements GameSidebarAct
             tagForRefreshNeeded();
             ActivityHelper.startDataPrefsActivity( this );
             return true;
+        } else if (item.getItemId() == R.id.menuItem_categoryRetroAchievements) {
+            ActivityHelper.startRetroAchievementsPrefsActivity( this );
+            return true;
         } else if (item.getItemId() == R.id.menuItem_categoryNetplay) {
             ActivityHelper.startNetplayPrefsActivity( this );
             return true;
