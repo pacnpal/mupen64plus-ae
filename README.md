@@ -8,6 +8,18 @@ Please visit [the official forum](http://www.paulscode.com/forum/index.php) for 
       alt="Get it on F-Droid"
       height="80">](https://f-droid.org/packages/org.mupen64plusae.v3.alpha/)
 
+## RetroAchievements
+
+RetroAchievements integration is now included.
+
+To use it:
+1. Create a RetroAchievements account at [retroachievements.org](https://retroachievements.org/) and get your API token.
+2. In the app, open `Settings -> RetroAchievements`, enable it, then log in with your username and API token.
+3. Launch a supported game with a matching, unmodified ROM hash.
+
+Notes:
+- Achievements and leaderboards only work for supported game hashes.
+- If you enable Hardcore mode, features like save states and cheats are disabled.
 
 ## Nightly Builds
 
