@@ -999,5 +999,47 @@
     <string name="actionOpenMenu">Open main menu</string>
     <string name="actionSearchRoms">Search ROMs</string>
 
+    <!-- RetroAchievements Strings -->
+    <string name="retroachievements_category_account">Account</string>
+    <string name="retroachievements_category_settings">Settings</string>
+    <string name="retroachievements_category_info">Information</string>
+    
+    <string name="retroachievements_enabled_title">Enable RetroAchievements</string>
+    <string name="retroachievements_enabled_summary">Enable achievement tracking for supported N64 games</string>
+    
+    <string name="retroachievements_login_title">Login</string>
+    <string name="retroachievements_login_summary">Sign in to your RetroAchievements account</string>
+    <string name="retroachievements_login">Login</string>
+    <string name="retroachievements_logged_in_as">Logged in as %s</string>
+    <string name="retroachievements_login_empty">Username and token cannot be empty</string>
+    <string name="retroachievements_login_success">Logged in as %s</string>
+    
+    <string name="retroachievements_username_hint">Username</string>
+    <string name="retroachievements_token_hint">API Token</string>
+    
+    <string name="retroachievements_logout_title">Logout</string>
+    <string name="retroachievements_logout_summary">Sign out of your account</string>
+    <string name="retroachievements_logout_confirm">Are you sure you want to logout?</string>
+    <string name="retroachievements_logout_success">Logged out successfully</string>
+    
+    <string name="retroachievements_hardcore_title">Hardcore Mode</string>
+    <string name="retroachievements_hardcore_summary">Disable save states, cheats, and rewind for full points</string>
+    
+    <string name="retroachievements_about_title">About RetroAchievements</string>
+    <string name="retroachievements_about_summary">RetroAchievements adds achievements, leaderboards, and progression tracking to classic games. Visit retroachievements.org to create an account.</string>
+    
+    <string name="retroachievements_title">RetroAchievements</string>
+    
+    <!-- RetroAchievements Notifications -->
+    <string name="retroachievements_channel_name">RetroAchievements</string>
+    <string name="retroachievements_channel_description">RetroAchievements notifications for unlocked achievements</string>
+    <string name="retroachievements_achievement_unlocked">Achievement Unlocked!</string>
+    <string name="retroachievements_achievement_toast">%1$s (%2$d points)</string>
+    <string name="retroachievements_achievement_detail">%1$s\n%2$s\n+%3$d points</string>
+    <string name="retroachievements_game_no_achievements">%1$s - No achievements available</string>
+    <string name="retroachievements_game_progress">%1$s - %2$d/%3$d achievements unlocked</string>
+    <string name="retroachievements_leaderboard_submission">Leaderboard: %1$s - %2$s</string>
+    <string name="retroachievements_hardcore_active">Hardcore Mode Active - Save states disabled</string>
+
 
 </resources>

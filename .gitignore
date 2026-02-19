@@ -52,3 +52,7 @@ crashreport.txt
 
 # Transifex client
 tx.exe
+
+
+#Ignore vscode AI rules
+.github/instructions/codacy.instructions.md

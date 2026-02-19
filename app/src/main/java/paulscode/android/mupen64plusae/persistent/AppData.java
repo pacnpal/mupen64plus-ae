@@ -340,6 +340,12 @@ public class AppData
     private static final String KEY_FORCE_ASSET_CHECK = "assetCheck";
     private static final String KEY_APP_VERSION = "appVersion";
     private static final String CHANNEL_ID = "CHANNEL_ID";
+    
+    // RetroAchievements keys
+    private static final String KEY_RA_USERNAME = "retroachievementsUsername";
+    private static final String KEY_RA_TOKEN = "retroachievementsToken";
+    private static final String KEY_RA_ENABLED = "retroachievementsEnabled";
+    private static final String KEY_RA_HARDCORE = "retroachievementsHardcore";
     // ... add more as needed
     
     /**
@@ -733,5 +739,81 @@ public class AppData
     public static Spanned fromHtml(String source)
     {
         return Html.fromHtml(source, Html.FROM_HTML_MODE_LEGACY);
+    }
+    
+    // ========== RetroAchievements Preferences ==========
+    
+    /**
+     * Get RetroAchievements username
+     * @return Username or null if not set
+     */
+    public String getRetroAchievementsUsername() {
+        return mPreferences.getString(KEY_RA_USERNAME, null);
+    }
+    
+    /**
+     * Set RetroAchievements username
+     * @param username Username to store
+     */
+    public void setRetroAchievementsUsername(String username) {
+        mPreferences.edit().putString(KEY_RA_USERNAME, username).apply();
+    }
+    
+    /**
+     * Get RetroAchievements token
+     * @return Token or null if not set
+     */
+    public String getRetroAchievementsToken() {
+        return mPreferences.getString(KEY_RA_TOKEN, null);
+    }
+    
+    /**
+     * Set RetroAchievements token
+     * @param token Token to store
+     */
+    public void setRetroAchievementsToken(String token) {
+        mPreferences.edit().putString(KEY_RA_TOKEN, token).apply();
+    }
+    
+    /**
+     * Check if RetroAchievements is enabled
+     * @return True if enabled
+     */
+    public boolean isRetroAchievementsEnabled() {
+        return mPreferences.getBoolean(KEY_RA_ENABLED, false);
+    }
+    
+    /**
+     * Set RetroAchievements enabled state
+     * @param enabled True to enable
+     */
+    public void setRetroAchievementsEnabled(boolean enabled) {
+        mPreferences.edit().putBoolean(KEY_RA_ENABLED, enabled).apply();
+    }
+    
+    /**
+     * Check if RetroAchievements hardcore mode is enabled
+     * @return True if hardcore mode enabled
+     */
+    public boolean isRetroAchievementsHardcore() {
+        return mPreferences.getBoolean(KEY_RA_HARDCORE, false);
+    }
+    
+    /**
+     * Set RetroAchievements hardcore mode
+     * @param hardcore True to enable hardcore mode
+     */
+    public void setRetroAchievementsHardcore(boolean hardcore) {
+        mPreferences.edit().putBoolean(KEY_RA_HARDCORE, hardcore).apply();
+    }
+    
+    /**
+     * Clear all RetroAchievements credentials
+     */
+    public void clearRetroAchievementsCredentials() {
+        mPreferences.edit()
+            .remove(KEY_RA_USERNAME)
+            .remove(KEY_RA_TOKEN)
+            .apply();
     }
 }
