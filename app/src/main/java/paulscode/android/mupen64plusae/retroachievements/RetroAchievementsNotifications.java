@@ -57,17 +57,19 @@ public class RetroAchievementsNotifications {
      */
     public void showAchievementUnlock(String achievementTitle, String achievementDescription, int points) {
         // Show as toast for immediate feedback
-        String message = achievementTitle + " (" + points + " points)";
-        Toast.makeText(mContext, "🏆 " + message, Toast.LENGTH_LONG).show();
+        String message = mContext.getString(R.string.retroachievements_achievement_toast, achievementTitle, points);
+        Toast.makeText(mContext, message, Toast.LENGTH_LONG).show();
 
         // Also show as notification for history
         if (mNotificationManager != null) {
+            String detailText = mContext.getString(R.string.retroachievements_achievement_detail, 
+                    achievementTitle, achievementDescription, points);
+            
             NotificationCompat.Builder builder = new NotificationCompat.Builder(mContext, CHANNEL_ID)
                     .setSmallIcon(R.drawable.ic_controller)
-                    .setContentTitle("Achievement Unlocked!")
+                    .setContentTitle(mContext.getString(R.string.retroachievements_achievement_unlocked))
                     .setContentText(achievementTitle)
-                    .setStyle(new NotificationCompat.BigTextStyle()
-                            .bigText(achievementTitle + "\n" + achievementDescription + "\n+" + points + " points"))
+                    .setStyle(new NotificationCompat.BigTextStyle().bigText(detailText))
                     .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                     .setAutoCancel(true);
 
@@ -84,9 +86,9 @@ public class RetroAchievementsNotifications {
     public void showGamePlacard(String gameTitle, int unlockedCount, int totalCount) {
         String message;
         if (totalCount == 0) {
-            message = gameTitle + " - No achievements available";
+            message = mContext.getString(R.string.retroachievements_game_no_achievements, gameTitle);
         } else {
-            message = gameTitle + " - " + unlockedCount + "/" + totalCount + " achievements unlocked";
+            message = mContext.getString(R.string.retroachievements_game_progress, gameTitle, unlockedCount, totalCount);
         }
         Toast.makeText(mContext, message, Toast.LENGTH_LONG).show();
     }
@@ -97,7 +99,7 @@ public class RetroAchievementsNotifications {
      * @param score Score achieved
      */
     public void showLeaderboardSubmission(String leaderboardTitle, String score) {
-        String message = "Leaderboard: " + leaderboardTitle + " - " + score;
+        String message = mContext.getString(R.string.retroachievements_leaderboard_submission, leaderboardTitle, score);
         Toast.makeText(mContext, message, Toast.LENGTH_SHORT).show();
     }
 
@@ -105,7 +107,7 @@ public class RetroAchievementsNotifications {
      * Show hardcore mode notification
      */
     public void showHardcoreModeActive() {
-        Toast.makeText(mContext, "Hardcore Mode Active - Save states disabled", Toast.LENGTH_LONG).show();
+        Toast.makeText(mContext, mContext.getString(R.string.retroachievements_hardcore_active), Toast.LENGTH_LONG).show();
     }
 
     /**

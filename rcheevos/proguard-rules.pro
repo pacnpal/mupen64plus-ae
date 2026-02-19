@@ -1,6 +1,7 @@
 # Add project specific ProGuard rules here.
-# Keep rcheevos native methods
--keepclasseswithmembernames class * {
+
+# Keep native methods for RetroAchievements JNI bridge only
+-keepclasseswithmembernames class paulscode.android.mupen64plusae.retroachievements.** {
     native <methods>;
 }
 

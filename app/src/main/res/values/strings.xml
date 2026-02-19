@@ -1029,6 +1029,15 @@
     <string name="retroachievements_about_summary">RetroAchievements adds achievements, leaderboards, and progression tracking to classic games. Visit retroachievements.org to create an account.</string>
     
     <string name="retroachievements_title">RetroAchievements</string>
+    
+    <!-- RetroAchievements Notifications -->
+    <string name="retroachievements_achievement_unlocked">Achievement Unlocked!</string>
+    <string name="retroachievements_achievement_toast">%1$s (%2$d points)</string>
+    <string name="retroachievements_achievement_detail">%1$s\n%2$s\n+%3$d points</string>
+    <string name="retroachievements_game_no_achievements">%1$s - No achievements available</string>
+    <string name="retroachievements_game_progress">%1$s - %2$d/%3$d achievements unlocked</string>
+    <string name="retroachievements_leaderboard_submission">Leaderboard: %1$s - %2$s</string>
+    <string name="retroachievements_hardcore_active">Hardcore Mode Active - Save states disabled</string>
 
 
 </resources>

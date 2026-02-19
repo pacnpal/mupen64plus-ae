@@ -14,14 +14,25 @@ import android.util.Log;
  */
 public class RCheevosNative {
     private static final String TAG = "RCheevosNative";
+    private static volatile boolean sLibraryLoaded = false;
     
     static {
         try {
             System.loadLibrary("rcheevos");
+            sLibraryLoaded = true;
             Log.i(TAG, "rcheevos library loaded successfully");
         } catch (UnsatisfiedLinkError e) {
             Log.e(TAG, "Failed to load rcheevos library", e);
+            throw e;
         }
+    }
+    
+    /**
+     * Check if native library is loaded
+     * @return true if library loaded successfully
+     */
+    public static boolean isLibraryLoaded() {
+        return sLibraryLoaded;
     }
     
     /**

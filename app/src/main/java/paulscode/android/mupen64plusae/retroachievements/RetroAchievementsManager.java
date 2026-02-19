@@ -23,11 +23,12 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
     
     private final Context mContext;
     private final RCheevosNative mNative;
-    private final RetroAchievementsHttpClient mHttpClient;
+    private RetroAchievementsHttpClient mHttpClient;
     private final RetroAchievementsNotifications mNotifications;
     
     private long mClientPtr = 0;
     private boolean mInitialized = false;
+    private boolean mShuttingDown = false;
     private boolean mHardcoreEnabled = false;
     private String mUsername;
     private String mToken;
@@ -35,7 +36,8 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
     // Memory read callback - will be set by CoreService
     private MemoryReadCallback mMemoryReadCallback;
     
-    // Pending HTTP requests (callback ptr -> callback data ptr)
+    // Pending HTTP requests (callback data ptr -> callback ptr)
+    // Using callbackDataPtr as key since it's unique per request
     private final Map<Long, Long> mPendingRequests = new HashMap<>();
     
     /**
@@ -58,8 +60,9 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
     private RetroAchievementsManager(Context context) {
         mContext = context;
         mNative = new RCheevosNative();
-        mHttpClient = new RetroAchievementsHttpClient();
         mNotifications = new RetroAchievementsNotifications(context);
+        // Don't create HttpClient here - create it in initialize()
+        mHttpClient = null;
     }
     
     /**
@@ -69,6 +72,17 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
         if (mInitialized) {
             Log.w(TAG, "Already initialized");
             return true;
+        }
+        
+        // Check if native library loaded
+        if (!RCheevosNative.isLibraryLoaded()) {
+            Log.e(TAG, "Native library not loaded");
+            return false;
+        }
+        
+        // Create HttpClient for this session
+        if (mHttpClient == null) {
+            mHttpClient = new RetroAchievementsHttpClient();
         }
         
         // Create native client
@@ -81,7 +95,8 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
         // Set callback handler
         mNative.nativeSetCallbackHandler(this);
         
-        mInitialized = true;
+        mInitialized = false;
+        mShuttingDown = false;
         Log.i(TAG, "RetroAchievements initialized successfully");
         return true;
     }
@@ -94,12 +109,24 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
             return;
         }
         
+        mShuttingDown = true;
+        
+        // Clear pending requests
+        synchronized (mPendingRequests) {
+            mPendingRequests.clear();
+        }
+        
         if (mClientPtr != 0) {
             mNative.nativeDestroyClient(mClientPtr);
             mClientPtr = 0;
         }
         
-        mHttpClient.shutdown();
+        // Shutdown and recreate HttpClient for next session
+        if (mHttpClient != null) {
+            mHttpClient.shutdown();
+            mHttpClient = null;
+        }
+        
         mInitialized = false;
         Log.i(TAG, "RetroAchievements shut down");
     }
@@ -161,7 +188,8 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
     }
     
     /**
-     * Process a frame - should be called every emulation frame
+     * Process achievements - should be called periodically during emulation
+     * Currently called every 500ms via CoreService periodic handler
      */
     public void doFrame() {
         if (mInitialized && mClientPtr != 0) {
@@ -213,46 +241,66 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
     public void onServerCall(String url, String postData, long callbackPtr, long callbackDataPtr) {
         Log.d(TAG, "Server call: " + url);
         
-        // Store pending request
+        // Store pending request using callbackDataPtr as key (unique per request)
         synchronized (mPendingRequests) {
-            mPendingRequests.put(callbackPtr, callbackDataPtr);
+            if (mShuttingDown) {
+                Log.w(TAG, "Ignoring server call during shutdown");
+                return;
+            }
+            mPendingRequests.put(callbackDataPtr, callbackPtr);
         }
         
         // Make HTTP request
         RetroAchievementsHttpClient.HttpCallback httpCallback = new RetroAchievementsHttpClient.HttpCallback() {
             @Override
             public void onResponse(int statusCode, String responseBody) {
+                // Guard against shutdown
+                if (mShuttingDown || !mInitialized) {
+                    Log.w(TAG, "Dropping response - manager shut down");
+                    return;
+                }
+                
                 Log.d(TAG, "Server response: " + statusCode);
                 
-                // Remove from pending
+                // Remove from pending using callbackDataPtr
                 synchronized (mPendingRequests) {
-                    Long dataPtr = mPendingRequests.remove(callbackPtr);
-                    if (dataPtr != null) {
+                    Long storedCallbackPtr = mPendingRequests.remove(callbackDataPtr);
+                    if (storedCallbackPtr != null) {
                         // Deliver response to native
-                        mNative.nativeServerResponse(callbackPtr, dataPtr, statusCode, responseBody);
+                        mNative.nativeServerResponse(storedCallbackPtr, callbackDataPtr, statusCode, responseBody);
                     }
                 }
             }
             
             @Override
             public void onError(String errorMessage) {
+                // Guard against shutdown
+                if (mShuttingDown || !mInitialized) {
+                    Log.w(TAG, "Dropping error - manager shut down");
+                    return;
+                }
+                
                 Log.e(TAG, "Server error: " + errorMessage);
                 
                 // Remove from pending and deliver error (status code 0)
                 synchronized (mPendingRequests) {
-                    Long dataPtr = mPendingRequests.remove(callbackPtr);
-                    if (dataPtr != null) {
-                        mNative.nativeServerResponse(callbackPtr, dataPtr, 0, errorMessage);
+                    Long storedCallbackPtr = mPendingRequests.remove(callbackDataPtr);
+                    if (storedCallbackPtr != null) {
+                        mNative.nativeServerResponse(storedCallbackPtr, callbackDataPtr, 0, errorMessage);
                     }
                 }
             }
         };
         
         // Execute request
-        if (postData != null && !postData.isEmpty()) {
-            mHttpClient.post(url, postData, httpCallback);
+        if (mHttpClient != null) {
+            if (postData != null && !postData.isEmpty()) {
+                mHttpClient.post(url, postData, httpCallback);
+            } else {
+                mHttpClient.get(url, httpCallback);
+            }
         } else {
-            mHttpClient.get(url, httpCallback);
+            Log.e(TAG, "HttpClient is null, cannot make request");
         }
     }
 }

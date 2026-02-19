@@ -138,10 +138,16 @@ public class RetroAchievementsPrefsActivity extends AppCompatPreferenceActivity
         tokenInput.setHint(R.string.retroachievements_token_hint);
         tokenInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
 
-        // Simple linear layout for inputs (you may want to use a proper layout XML)
+        // Simple linear layout for inputs
         android.widget.LinearLayout layout = new android.widget.LinearLayout(this);
         layout.setOrientation(android.widget.LinearLayout.VERTICAL);
-        layout.setPadding(50, 40, 50, 10);
+        
+        // Convert dp to pixels for proper density-independent spacing
+        int paddingDp = 16; // Standard material design padding
+        float density = getResources().getDisplayMetrics().density;
+        int paddingPx = (int) (paddingDp * density);
+        layout.setPadding(paddingPx, paddingPx, paddingPx, paddingPx / 2);
+        
         layout.addView(usernameInput);
         layout.addView(tokenInput);
 

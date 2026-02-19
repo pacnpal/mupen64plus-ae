@@ -124,14 +124,39 @@ public class RetroAchievementsHttpClient {
     private String readResponse(HttpURLConnection connection, int statusCode) throws IOException {
         StringBuilder response = new StringBuilder();
         
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(
-                    statusCode >= 400 ? connection.getErrorStream() : connection.getInputStream(),
-                    StandardCharsets.UTF_8))) {
+        // Choose appropriate stream - error stream for 4xx/5xx, input stream otherwise
+        InputStream stream = null;
+        try {
+            if (statusCode >= 400) {
+                stream = connection.getErrorStream();
+                // If error stream is null, try input stream as fallback
+                if (stream == null) {
+                    stream = connection.getInputStream();
+                }
+            } else {
+                stream = connection.getInputStream();
+            }
             
-            String line;
-            while ((line = reader.readLine()) != null) {
-                response.append(line);
+            // If we still don't have a stream, return empty response
+            if (stream == null) {
+                return "";
+            }
+            
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+                
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    response.append(line);
+                }
+            }
+        } finally {
+            // Close stream if we opened it
+            if (stream != null) {
+                try {
+                    stream.close();
+                } catch (IOException ignored) {
+                }
             }
         }
         
