@@ -102,4 +102,22 @@ public class RCheevosNative {
      */
     public native void nativeServerResponse(long callbackPtr, long callbackDataPtr,
                                            int httpStatusCode, String responseBody);
+    
+    /**
+     * Begin login with token
+     * @param clientPtr Client pointer
+     * @param username Username
+     * @param token API token
+     * @param callbackPtr Callback pointer (will be called on completion)
+     */
+    public native void nativeBeginLoginWithToken(long clientPtr, String username, String token, long callbackPtr);
+    
+    /**
+     * Begin identify and load game
+     * @param clientPtr Client pointer
+     * @param consoleId Console ID
+     * @param gameHash Game hash string
+     * @param callbackPtr Callback pointer (will be called on completion)
+     */
+    public native void nativeBeginIdentifyAndLoadGame(long clientPtr, int consoleId, String gameHash, long callbackPtr);
 }

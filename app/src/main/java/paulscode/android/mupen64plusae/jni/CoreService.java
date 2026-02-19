@@ -66,6 +66,7 @@ import paulscode.android.mupen64plusae.game.GameDataManager;
 import paulscode.android.mupen64plusae.persistent.AppData;
 import paulscode.android.mupen64plusae.persistent.GamePrefs;
 import paulscode.android.mupen64plusae.persistent.GlobalPrefs;
+import paulscode.android.mupen64plusae.retroachievements.RetroAchievementsManager;
 import paulscode.android.mupen64plusae.util.CountryCode;
 import paulscode.android.mupen64plusae.util.FileUtil;
 import paulscode.android.mupen64plusae.util.PixelBuffer;
@@ -176,6 +177,7 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
     private GamePrefs mGamePrefs = null;
 
     private GameDataManager mGameDataManager = null;
+    private RetroAchievementsManager mRetroAchievementsManager = null;
 
     private static final CoreInterface mCoreInterface = new CoreInterface();
 
@@ -721,6 +723,22 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
                     mListener.onCoreServiceStarted();
                 }
 
+                // Start RetroAchievements session if enabled
+                if (mRetroAchievementsManager != null && mRetroAchievementsManager.isLoggedIn()) {
+                    try {
+                        String raHash = mRetroAchievementsManager.generateHash(mRomPath);
+                        if (raHash != null && !raHash.isEmpty()) {
+                            Log.i(TAG, "RetroAchievements: Game hash generated: " + raHash);
+                            // Note: Full game loading with rc_client_begin_identify_and_load_game
+                            // will be implemented in native layer extensions
+                        } else {
+                            Log.w(TAG, "RetroAchievements: Failed to generate game hash");
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "RetroAchievements: Error generating hash", e);
+                    }
+                }
+
                 if (!mIsShuttingDown) {
                     if (!mIsRestarting)
                     {
@@ -909,6 +927,26 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
         mAppData = new AppData(this);
         mGlobalPrefs = new GlobalPrefs( this, mAppData );
 
+        // Initialize RetroAchievements if enabled
+        if (mAppData.isRetroAchievementsEnabled()) {
+            mRetroAchievementsManager = RetroAchievementsManager.getInstance(this);
+            if (mRetroAchievementsManager.initialize()) {
+                // Set hardcore mode
+                mRetroAchievementsManager.setHardcoreEnabled(mAppData.isRetroAchievementsHardcore());
+                
+                // Load credentials
+                String username = mAppData.getRetroAchievementsUsername();
+                String token = mAppData.getRetroAchievementsToken();
+                if (username != null && token != null) {
+                    mRetroAchievementsManager.setCredentials(username, token);
+                }
+                
+                Log.i(TAG, "RetroAchievements initialized");
+            } else {
+                Log.e(TAG, "Failed to initialize RetroAchievements");
+            }
+        }
+
         // Register to receive messages.
         // We are registering an observer (mMessageReceiver) to receive Intents
         // with actions named "SERVICE_EVENT".
@@ -1087,6 +1125,12 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
     {
         Log.i(TAG, "onDestroy");
 
+        // Shutdown RetroAchievements
+        if (mRetroAchievementsManager != null) {
+            mRetroAchievementsManager.shutdown();
+            mRetroAchievementsManager = null;
+        }
+
         // Unregister since the activity is about to be closed.
         unregisterReceiver(mMessageReceiver);
 
@@ -1175,6 +1219,15 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
             synchronized (mWaitForNetPlay) {
                 if (mNetplayReady) {
                     mWaitForNetPlay.notify();
+                }
+            }
+
+            // Call RetroAchievements frame processing
+            if (mRetroAchievementsManager != null && mIsRunning && !mIsPaused) {
+                try {
+                    mRetroAchievementsManager.doFrame();
+                } catch (Exception e) {
+                    Log.e(TAG, "RetroAchievements: Error in doFrame", e);
                 }
             }
 

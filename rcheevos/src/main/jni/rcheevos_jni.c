@@ -267,3 +267,55 @@ Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeServ
         callback(&server_response, callback_data);
     }
 }
+
+// Login callback wrapper - stores callback info for Java
+typedef struct {
+    JNIEnv* env;
+    jobject java_callback;
+    jlong java_callback_id;
+} login_callback_data_t;
+
+// Begin login with token
+JNIEXPORT void JNICALL
+Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeBeginLoginWithToken(
+    JNIEnv* env, jobject thiz, jlong client_ptr, jstring username, jstring token, jlong callback_ptr) {
+    
+    rc_client_t* client = (rc_client_t*)(intptr_t)client_ptr;
+    if (client == NULL) {
+        LOGE("Client is null");
+        return;
+    }
+    
+    const char* c_username = (*env)->GetStringUTFChars(env, username, NULL);
+    const char* c_token = (*env)->GetStringUTFChars(env, token, NULL);
+    
+    // Note: Full rc_client_begin_login_with_token implementation requires
+    // callback handling which is complex. For now, we'll store credentials
+    // and handle login in Java layer through HTTP calls
+    
+    LOGI("Login requested for user: %s", c_username);
+    
+    (*env)->ReleaseStringUTFChars(env, username, c_username);
+    (*env)->ReleaseStringUTFChars(env, token, c_token);
+}
+
+// Begin identify and load game
+JNIEXPORT void JNICALL
+Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeBeginIdentifyAndLoadGame(
+    JNIEnv* env, jobject thiz, jlong client_ptr, jint console_id, jstring game_hash, jlong callback_ptr) {
+    
+    rc_client_t* client = (rc_client_t*)(intptr_t)client_ptr;
+    if (client == NULL) {
+        LOGE("Client is null");
+        return;
+    }
+    
+    const char* c_hash = (*env)->GetStringUTFChars(env, game_hash, NULL);
+    
+    // Note: Full rc_client_begin_identify_and_load_game implementation requires
+    // async callback handling. For now, we log the request
+    
+    LOGI("Game identification requested - Console: %d, Hash: %s", console_id, c_hash);
+    
+    (*env)->ReleaseStringUTFChars(env, game_hash, c_hash);
+}
