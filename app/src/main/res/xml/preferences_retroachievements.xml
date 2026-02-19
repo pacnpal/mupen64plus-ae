@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.preference.PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <androidx.preference.PreferenceCategory
+        android:title="@string/retroachievements_category_account"
+        android:key="categoryAccount">
+
+        <androidx.preference.SwitchPreferenceCompat
+            android:key="retroachievementsEnabled"
+            android:title="@string/retroachievements_enabled_title"
+            android:summary="@string/retroachievements_enabled_summary"
+            android:defaultValue="false" />
+
+        <Preference
+            android:key="retroachievementsLogin"
+            android:title="@string/retroachievements_login_title"
+            android:summary="@string/retroachievements_login_summary" />
+
+        <Preference
+            android:key="retroachievementsLogout"
+            android:title="@string/retroachievements_logout_title"
+            android:summary="@string/retroachievements_logout_summary" />
+
+    </androidx.preference.PreferenceCategory>
+
+    <androidx.preference.PreferenceCategory
+        android:title="@string/retroachievements_category_settings"
+        android:key="categorySettings">
+
+        <androidx.preference.SwitchPreferenceCompat
+            android:key="retroachievementsHardcore"
+            android:title="@string/retroachievements_hardcore_title"
+            android:summary="@string/retroachievements_hardcore_summary"
+            android:defaultValue="false" />
+
+    </androidx.preference.PreferenceCategory>
+
+    <androidx.preference.PreferenceCategory
+        android:title="@string/retroachievements_category_info"
+        android:key="categoryInfo">
+
+        <Preference
+            android:key="retroachievementsAbout"
+            android:title="@string/retroachievements_about_title"
+            android:summary="@string/retroachievements_about_summary"
+            android:selectable="false" />
+
+    </androidx.preference.PreferenceCategory>
+
+</androidx.preference.PreferenceScreen>
