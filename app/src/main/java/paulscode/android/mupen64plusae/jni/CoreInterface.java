@@ -917,9 +917,14 @@ class CoreInterface
         }
 
         try {
+            // Use bulk read for better performance, then apply N64 byte-swizzle
+            byte[] tempBuffer = rdram.getByteArray(rdramAddress, bytesToRead);
+            
+            // Apply N64 byte-swizzle to each byte
             for (int i = 0; i < bytesToRead; i++) {
-                buffer[i] = rdram.getByte((rdramAddress + i) ^ N64_BYTE_XOR);
+                buffer[i] = tempBuffer[i ^ N64_BYTE_XOR];
             }
+            
             return bytesToRead;
         } catch (RuntimeException e) {
             Log.w(TAG, "Failed to read emulated memory", e);

@@ -1031,6 +1031,8 @@
     <string name="retroachievements_title">RetroAchievements</string>
     
     <!-- RetroAchievements Notifications -->
+    <string name="retroachievements_channel_name">RetroAchievements</string>
+    <string name="retroachievements_channel_description">RetroAchievements notifications for unlocked achievements</string>
     <string name="retroachievements_achievement_unlocked">Achievement Unlocked!</string>
     <string name="retroachievements_achievement_toast">%1$s (%2$d points)</string>
     <string name="retroachievements_achievement_detail">%1$s\n%2$s\n+%3$d points</string>

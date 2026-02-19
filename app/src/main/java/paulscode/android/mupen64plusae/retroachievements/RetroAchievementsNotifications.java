@@ -21,7 +21,6 @@ import paulscode.android.mupen64plusae.R;
 public class RetroAchievementsNotifications {
     private static final String TAG = "RANotifications";
     private static final String CHANNEL_ID = "retroachievements_channel";
-    private static final String CHANNEL_NAME = "RetroAchievements";
     private static final int NOTIFICATION_ID_BASE = 10000;
 
     private final Context mContext;
@@ -38,10 +37,10 @@ public class RetroAchievementsNotifications {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
                     CHANNEL_ID,
-                    CHANNEL_NAME,
+                    mContext.getString(R.string.retroachievements_channel_name),
                     NotificationManager.IMPORTANCE_DEFAULT
             );
-            channel.setDescription("RetroAchievements notifications for unlocked achievements");
+            channel.setDescription(mContext.getString(R.string.retroachievements_channel_description));
             channel.enableVibration(true);
             if (mNotificationManager != null) {
                 mNotificationManager.createNotificationChannel(channel);

@@ -277,8 +277,9 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
     }
     
     /**
-     * Process achievements - should be called periodically during emulation
-     * Currently called every 500ms via CoreService periodic handler
+     * Process achievements - called periodically during emulation
+     * Invoked from CoreService.onFrameRendered() with 500ms throttling
+     * to avoid performance overhead on the render thread
      */
     public void doFrame() {
         if (mInitialized && mClientPtr != 0 && mSessionActive) {
@@ -400,6 +401,19 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
             }
         } else {
             Log.e(TAG, "HttpClient is null, cannot make request");
+            
+            // Remove from pending and deliver a client transport error so native can retry or fail cleanly
+            synchronized (mPendingRequests) {
+                Long storedCallbackPtr = mPendingRequests.remove(callbackDataPtr);
+                if (storedCallbackPtr != null) {
+                    // Use status code 0 to indicate client-side error
+                    mNative.nativeServerResponse(
+                            storedCallbackPtr,
+                            callbackDataPtr,
+                            0,
+                            "HTTP client unavailable");
+                }
+            }
         }
     }
 

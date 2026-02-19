@@ -179,6 +179,8 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
 
     private GameDataManager mGameDataManager = null;
     private RetroAchievementsManager mRetroAchievementsManager = null;
+    private long mLastRAFrameTime = 0;
+    private static final long RA_FRAME_INTERVAL_MS = 500;  // Call doFrame every 500ms
 
     private static final CoreInterface mCoreInterface = new CoreInterface();
 
@@ -1308,11 +1310,16 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
 
     @Override
     public void onFrameRendered() {
+        // Throttle RetroAchievements processing to every 500ms to avoid overhead on render thread
         if (mRetroAchievementsManager != null && mIsRunning && !mIsPaused) {
-            try {
-                mRetroAchievementsManager.doFrame();
-            } catch (Exception e) {
-                Log.e(TAG, "RetroAchievements: Error in doFrame", e);
+            long currentTime = System.currentTimeMillis();
+            if (currentTime - mLastRAFrameTime >= RA_FRAME_INTERVAL_MS) {
+                mLastRAFrameTime = currentTime;
+                try {
+                    mRetroAchievementsManager.doFrame();
+                } catch (Exception e) {
+                    Log.e(TAG, "RetroAchievements: Error in doFrame", e);
+                }
             }
         }
     }

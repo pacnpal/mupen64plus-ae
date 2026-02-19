@@ -38,11 +38,15 @@ static const char* rc_client_external_build_avatar_url(char buffer[], size_t buf
   image_request.image_type = image_type;
   image_request.image_name = image_name;
 
+  memset(&request, 0, sizeof(request));
   result = rc_api_init_fetch_image_request(&request, &image_request);
-  if (result != RC_OK)
+  if (result != RC_OK) {
+    rc_api_destroy_request(&request);
     return NULL;
+  }
 
   snprintf(buffer, buffer_size, "%s", request.url);
+  rc_api_destroy_request(&request);
   return buffer;
 }
 
@@ -53,9 +57,10 @@ static void rc_client_external_conversions_init(const rc_client_t* client)
     rc_client_external_conversions_t* conversions = (rc_client_external_conversions_t*)
       rc_buffer_alloc(&mutable_client->state.buffer, sizeof(rc_client_external_conversions_t));
 
-    memset(conversions, 0, sizeof(*conversions));
-
-    mutable_client->state.external_client_conversions = conversions;
+    if (conversions) {
+      memset(conversions, 0, sizeof(*conversions));
+      mutable_client->state.external_client_conversions = conversions;
+    }
   }
 }
 

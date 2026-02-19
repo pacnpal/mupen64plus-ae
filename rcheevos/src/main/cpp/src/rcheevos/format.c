@@ -131,13 +131,18 @@ static int rc_format_value_centiseconds(char* buffer, size_t size, uint32_t cent
   centiseconds -= seconds * 100;
 
   chars = rc_format_value_seconds(buffer, size, seconds);
-  if (chars > 0) {
-    chars2 = snprintf(buffer + chars, size - chars, ".%02u", centiseconds);
-    if (chars2 > 0) {
-      chars += chars2;
-    } else {
-      chars = chars2;
-    }
+  if (chars <= 0)
+    return chars;
+  
+  /* Check if snprintf would overflow the buffer */
+  if ((size_t)chars >= size)
+    return chars;
+  
+  chars2 = snprintf(buffer + chars, size - (size_t)chars, ".%02u", centiseconds);
+  if (chars2 > 0) {
+    chars += chars2;
+  } else {
+    chars = chars2;
   }
 
   return chars;

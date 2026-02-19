@@ -129,7 +129,7 @@ char* rc_buffer_strncpy(rc_buffer_t* buffer, const char* src, size_t len)
   
   memcpy(dst, src, len);
   dst[len] = '\0';
-  rc_buffer_consume(buffer, dst, dst + len + 2);
+  rc_buffer_consume(buffer, dst, dst + len + 1);  // Fixed: consume len+1 bytes, not len+2
   return (char*)dst;
 }
 
