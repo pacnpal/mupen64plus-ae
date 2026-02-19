@@ -32,7 +32,9 @@ static bool detachOnQuitCore = false;
 m64p_dynlib_handle CoreHandle = NULL;
 ptr_CoreOverrideVidExt  CoreOverrideVidExt = NULL;
 
-void (*fpsCounterCallback)(int);
+void (*fpsCounterCallback)(int) = nullptr;
+void (*frameRenderedCallback)() = nullptr;
+std::mutex frameRenderedCallbackAccess;
 
 
 EGLint const defaultAttributeList[] = {
@@ -362,6 +364,12 @@ extern "C" DECLSPEC void registerFpsCounterCallback(void (*callback)(int))
 	fpsCounterCallback = callback;
 }
 
+extern "C" DECLSPEC void registerFrameRenderedCallback(void (*callback)())
+{
+	std::unique_lock<std::mutex> guard(frameRenderedCallbackAccess);
+	frameRenderedCallback = callback;
+}
+
 void FPSCounter(int fps)
 {
 	JNIEnv *env;
@@ -372,6 +380,28 @@ void FPSCounter(int fps)
 	}
 
 	fpsCounterCallback(fps);
+}
+
+void FrameRendered()
+{
+	void (*callback)() = nullptr;
+	{
+		std::unique_lock<std::mutex> guard(frameRenderedCallbackAccess);
+		callback = frameRenderedCallback;
+	}
+
+	if (callback == nullptr) {
+		return;
+	}
+
+	JNIEnv *env;
+	if (mJavaVM->GetEnv((void**) &env, JNI_VERSION_1_6) != JNI_OK) {
+		mJavaVM->AttachCurrentThread(&env, nullptr);
+		detachOnQuitCore = true;
+		return;
+	}
+
+	callback();
 }
 
 extern DECLSPEC m64p_error VidExtFuncGLSwapBuf()
@@ -416,6 +446,10 @@ extern DECLSPEC m64p_error VidExtFuncGLSwapBuf()
 				eglSwapBuffers(display, surface);
 			}
 		}
+	}
+
+	if (!isPaused) {
+		FrameRendered();
 	}
 
 	if (FPSRecalcPeriod > 0) {

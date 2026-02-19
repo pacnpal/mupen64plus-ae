@@ -56,6 +56,7 @@ extern uint32_t VidExtFuncGLGetDefaultFramebuffer(void);
 extern void vsyncEnabled(int enabled);
 extern void pauseEmulator();
 extern void resumeEmulator();
+extern void registerFrameRenderedCallback(void (*callback)());
 
 m64p_video_extension_functions vidExtFunctions = {14,
                                                   VidExtFuncInit,

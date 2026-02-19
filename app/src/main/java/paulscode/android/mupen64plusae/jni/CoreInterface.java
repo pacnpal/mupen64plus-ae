@@ -49,6 +49,7 @@ import org.apache.commons.io.output.ByteArrayOutputStream;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.ByteOrder;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -98,6 +99,11 @@ class CoreInterface
         void onFpsChanged( int newValue );
     }
 
+    public interface OnFrameRenderedListener
+    {
+        void onFrameRendered();
+    }
+
     /**
      * Generic library functions
      */
@@ -116,6 +122,8 @@ class CoreInterface
 
     final static long MAX_7ZIP_FILE_SIZE = 100*1024*1024;
     private static final String TAG = "CoreInterface";
+    private static final int N64_RDRAM_SIZE = 8 * 1024 * 1024;
+    private static final int N64_BYTE_XOR = ByteOrder.nativeOrder() == ByteOrder.LITTLE_ENDIAN ? 3 : 0;
 
     // Core state callbacks - used by NativeImports
     private final ArrayList<OnStateCallbackListener> mStateCallbackListeners = new ArrayList<>();
@@ -123,6 +131,7 @@ class CoreInterface
 
     //Frame rate info - used by ae-vidext
     private final ArrayList<OnFpsChangedListener> mFpsListeners = new ArrayList<>();
+    private final ArrayList<OnFrameRenderedListener> mFrameRenderedListeners = new ArrayList<>();
 
     private final CoreLibrary mMupen64PlusLibrary = Native.load("mupen64plus-core", CoreLibrary.class);
     private final AeBridgeLibrary mAeBridgeLibrary = Native.load("ae-bridge", AeBridgeLibrary.class, Collections.singletonMap(Library.OPTION_ALLOW_OBJECTS, Boolean.TRUE));
@@ -142,6 +151,7 @@ class CoreInterface
     private static final String DD_ROM_NAME = "dd_rom.n64";
     private static final String DD_DISK_NAME = "dd_disk.ndd";
     private File mWorkingPath = null;
+    private byte[] mLoadedRomDataForHash = null;
 
     private final HashMap<CoreTypes.m64p_plugin_type, Pointer> mPluginContext = new HashMap<>();
 
@@ -211,6 +221,15 @@ class CoreInterface
         }
     };
 
+    private final AeBridgeLibrary.FrameRenderedCallback mFrameRenderedCallback = () -> {
+        synchronized (mFrameRenderedListeners)
+        {
+            for (OnFrameRenderedListener listener: mFrameRenderedListeners) {
+                listener.onFrameRendered();
+            }
+        }
+    };
+
     private final CoreTypes.m64p_media_loader mMediaLoaderCallbacks = new CoreTypes.m64p_media_loader();
 
     CoreInterface()
@@ -259,7 +278,6 @@ class CoreInterface
         byte[] romBuffer = null;
 
         try (ParcelFileDescriptor parcelFileDescriptor = context.getContentResolver().openFileDescriptor(Uri.parse(romFileUri), "r")){
-            InputStream is;
             romBuffer = IOUtils.toByteArray(new FileInputStream(parcelFileDescriptor.getFileDescriptor()));
             success = romBuffer.length > 0;
         } catch (Exception|OutOfMemoryError e) {
@@ -269,6 +287,8 @@ class CoreInterface
         if (success)
         {
             openRom(romBuffer);
+        } else {
+            setLoadedRomDataForHash(null);
         }
 
         return success;
@@ -289,6 +309,8 @@ class CoreInterface
         if (success)
         {
             openRom(romBuffer);
+        } else {
+            setLoadedRomDataForHash(null);
         }
 
         return success;
@@ -296,11 +318,17 @@ class CoreInterface
 
     void openRom(byte[] romBuffer)
     {
+        if (romBuffer == null || romBuffer.length == 0) {
+            setLoadedRomDataForHash(null);
+            return;
+        }
+
         int romLength = romBuffer.length;
 
         Pointer parameter = new Memory(romLength);
         parameter.write(0, romBuffer, 0, romBuffer.length);
         mMupen64PlusLibrary.CoreDoCommand(CoreTypes.m64p_command.M64CMD_ROM_OPEN.ordinal(), romLength, parameter);
+        setLoadedRomDataForHash(romBuffer);
     }
 
     private byte[] extractZip(Context context, String romFileName, String zipPathUri) {
@@ -407,9 +435,23 @@ class CoreInterface
         if (success)
         {
             openRom(romBuffer);
+        } else {
+            setLoadedRomDataForHash(null);
         }
 
         return success;
+    }
+
+    synchronized byte[] consumeLoadedRomDataForHash()
+    {
+        byte[] romData = mLoadedRomDataForHash;
+        mLoadedRomDataForHash = null;
+        return romData;
+    }
+
+    private synchronized void setLoadedRomDataForHash(byte[] romData)
+    {
+        mLoadedRomDataForHash = romData;
     }
 
     public void setGbRomPath(Context context, SparseArray<String> romUris)
@@ -516,6 +558,11 @@ class CoreInterface
 
     }
 
+    String getDdDiskPath()
+    {
+        return mDdDisk;
+    }
+
     public void writeGbRamData(Context context, SparseArray<String> ramUri)
     {
         for (int player = 1; player <= 4; ++player) {
@@ -553,6 +600,13 @@ class CoreInterface
                 dataDirPath, mCoreContext, debugCallback, null, mStateCallBack);
         mAeBridgeLibrary.overrideAeVidExtFuncs();
         mAeBridgeLibrary.registerFpsCounterCallback(mFpsCounterCallback);
+        synchronized (mFrameRenderedListeners) {
+            if (mFrameRenderedListeners.isEmpty()) {
+                mAeBridgeLibrary.registerFrameRenderedCallback(null);
+            } else {
+                mAeBridgeLibrary.registerFrameRenderedCallback(mFrameRenderedCallback);
+            }
+        }
         return returnValue;
     }
 
@@ -840,6 +894,52 @@ class CoreInterface
         mMupen64PlusLibrary.CoreDoCommand(CoreTypes.m64p_command.M64CMD_RESET.ordinal(), 0, parameter);
     }
 
+    int readMemory(int address, byte[] buffer, int numBytes)
+    {
+        if (buffer == null || numBytes <= 0) {
+            return 0;
+        }
+
+        Pointer rdram = mMupen64PlusLibrary.DebugMemGetPointer(
+                CoreTypes.m64p_dbg_memptr_type.M64P_DBG_PTR_RDRAM.ordinal());
+        if (rdram == null) {
+            return 0;
+        }
+
+        int rdramAddress = normalizeRdramAddress(address);
+        if (rdramAddress < 0 || rdramAddress >= N64_RDRAM_SIZE) {
+            return 0;
+        }
+
+        int bytesToRead = Math.min(Math.min(numBytes, buffer.length), N64_RDRAM_SIZE - rdramAddress);
+        if (bytesToRead <= 0) {
+            return 0;
+        }
+
+        try {
+            for (int i = 0; i < bytesToRead; i++) {
+                buffer[i] = rdram.getByte((rdramAddress + i) ^ N64_BYTE_XOR);
+            }
+            return bytesToRead;
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Failed to read emulated memory", e);
+            return 0;
+        }
+    }
+
+    private int normalizeRdramAddress(int address)
+    {
+        long unsignedAddress = address & 0xffffffffL;
+        long region = unsignedAddress & 0xe0000000L;
+
+        // Map virtual KSEG0/KSEG1 addresses to physical memory.
+        if (region == 0x80000000L || region == 0xa0000000L) {
+            unsignedAddress &= 0x1fffffffL;
+        }
+
+        return (int) unsignedAddress;
+    }
+
     void setNativeWindow(Surface surface)
     {
         mAeBridgeLibrary.setNativeWindow(JNIEnv.CURRENT, surface);
@@ -894,6 +994,31 @@ class CoreInterface
             {
                 mFpsListeners.add(fpsListener);
                 coreInterface.FPSEnabled(fpsRecalcPeriod);
+            }
+        }
+    }
+
+    void addOnFrameRenderedListener(OnFrameRenderedListener frameRenderedListener)
+    {
+        synchronized (mFrameRenderedListeners)
+        {
+            if(frameRenderedListener != null && !mFrameRenderedListeners.contains(frameRenderedListener))
+            {
+                boolean wasEmpty = mFrameRenderedListeners.isEmpty();
+                mFrameRenderedListeners.add(frameRenderedListener);
+                if (wasEmpty) {
+                    mAeBridgeLibrary.registerFrameRenderedCallback(mFrameRenderedCallback);
+                }
+            }
+        }
+    }
+
+    void removeOnFrameRenderedListener(OnFrameRenderedListener frameRenderedListener)
+    {
+        synchronized (mFrameRenderedListeners)
+        {
+            if (mFrameRenderedListeners.remove(frameRenderedListener) && mFrameRenderedListeners.isEmpty()) {
+                mAeBridgeLibrary.registerFrameRenderedCallback(null);
             }
         }
     }

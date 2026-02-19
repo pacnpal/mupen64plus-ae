@@ -129,6 +129,16 @@ public class CoreTypes {
         }
     }
 
+    enum m64p_dbg_memptr_type {
+        M64P_DBG_PTR_DUMMY,
+        M64P_DBG_PTR_RDRAM,
+        M64P_DBG_PTR_PI_REG,
+        M64P_DBG_PTR_SI_REG,
+        M64P_DBG_PTR_VI_REG,
+        M64P_DBG_PTR_RI_REG,
+        M64P_DBG_PTR_AI_REG
+    }
+
     @Structure.FieldOrder({ "address", "value" })
     public static class m64p_cheat_code extends Structure
     {

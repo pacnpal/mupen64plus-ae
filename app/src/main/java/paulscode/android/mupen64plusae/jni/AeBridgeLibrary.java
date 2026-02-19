@@ -15,6 +15,10 @@ public interface AeBridgeLibrary extends Library {
     interface FpsCounterCallback extends Callback {
         void invoke(int fps);
     }
+
+    interface FrameRenderedCallback extends Callback {
+        void invoke();
+    }
     // Enable or disble VSYNC
     void vsyncEnabled(int enabled);
 
@@ -39,6 +43,8 @@ public interface AeBridgeLibrary extends Library {
     void overrideAeVidExtFuncs();
 
     void registerFpsCounterCallback(FpsCounterCallback fpsCounterCallback);
+
+    void registerFrameRenderedCallback(FrameRenderedCallback frameRenderedCallback);
 
     // Load a library using dlopen
     Pointer loadLibrary(String libName);

@@ -66,17 +66,25 @@ public class RetroAchievementsPrefsActivity extends AppCompatPreferenceActivity
         super.onCreate(savedInstanceState);
 
         mAppData = new AppData(this);
+    }
 
-        // Load preferences from XML
-        addPreferencesFromResource(R.xml.preferences_retroachievements);
+    @Override
+    protected String getSharedPrefsName() {
+        return null;
+    }
 
-        // Get preference references
+    @Override
+    protected int getSharedPrefsId() {
+        return R.xml.preferences_retroachievements;
+    }
+
+    @Override
+    protected void OnPreferenceScreenChange(String key) {
         mLoginPreference = findPreference(PREF_RA_LOGIN);
         mLogoutPreference = findPreference(PREF_RA_LOGOUT);
         mEnabledPreference = findPreference(PREF_RA_ENABLED);
         mHardcorePreference = findPreference(PREF_RA_HARDCORE);
 
-        // Set click listeners
         if (mLoginPreference != null) {
             mLoginPreference.setOnPreferenceClickListener(this);
         }
@@ -84,7 +92,6 @@ public class RetroAchievementsPrefsActivity extends AppCompatPreferenceActivity
             mLogoutPreference.setOnPreferenceClickListener(this);
         }
 
-        // Update UI based on login state
         updateLoginState();
     }
 
@@ -191,6 +198,7 @@ public class RetroAchievementsPrefsActivity extends AppCompatPreferenceActivity
                 .setMessage(R.string.retroachievements_logout_confirm)
                 .setPositiveButton(R.string.retroachievements_logout, (dialog, which) -> {
                     mAppData.clearRetroAchievementsCredentials();
+                    RetroAchievementsManager.getInstance(this).setCredentials(null, null);
 
                     Toast.makeText(this, R.string.retroachievements_logout_success, Toast.LENGTH_SHORT).show();
 

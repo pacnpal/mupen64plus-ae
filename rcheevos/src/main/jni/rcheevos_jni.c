@@ -21,6 +21,57 @@ static rc_client_t* g_client = NULL;
 static JavaVM* g_jvm = NULL;
 static jobject g_callback_handler = NULL;
 
+static void notify_session_callback(const char* method_name, jlong request_id, int success, const char* error_message) {
+    if (g_jvm == NULL || g_callback_handler == NULL) {
+        return;
+    }
+
+    JNIEnv* env;
+    jint result = (*g_jvm)->GetEnv(g_jvm, (void**)&env, JNI_VERSION_1_6);
+    int attached = 0;
+
+    if (result == JNI_EDETACHED) {
+        if ((*g_jvm)->AttachCurrentThread(g_jvm, &env, NULL) != 0) {
+            LOGE("Failed to attach thread for %s", method_name);
+            return;
+        }
+        attached = 1;
+    } else if (result != JNI_OK) {
+        LOGE("Failed to get JNIEnv for %s", method_name);
+        return;
+    }
+
+    jclass cls = (*env)->GetObjectClass(env, g_callback_handler);
+    if (cls == NULL) {
+        if (attached) {
+            (*g_jvm)->DetachCurrentThread(g_jvm);
+        }
+        return;
+    }
+
+    jmethodID mid = (*env)->GetMethodID(env, cls, method_name, "(JZLjava/lang/String;)V");
+    if (mid == NULL) {
+        LOGE("Could not find %s method", method_name);
+        (*env)->DeleteLocalRef(env, cls);
+        if (attached) {
+            (*g_jvm)->DetachCurrentThread(g_jvm);
+        }
+        return;
+    }
+
+    jstring jerror = (error_message != NULL) ? (*env)->NewStringUTF(env, error_message) : NULL;
+    (*env)->CallVoidMethod(env, g_callback_handler, mid, request_id, success ? JNI_TRUE : JNI_FALSE, jerror);
+
+    if (jerror != NULL) {
+        (*env)->DeleteLocalRef(env, jerror);
+    }
+    (*env)->DeleteLocalRef(env, cls);
+
+    if (attached) {
+        (*g_jvm)->DetachCurrentThread(g_jvm);
+    }
+}
+
 // Memory read callback - will be called by rcheevos to read emulator memory
 static uint32_t memory_read_callback(uint32_t address, uint8_t* buffer, uint32_t num_bytes, rc_client_t* client) {
     JNIEnv* env;
@@ -102,6 +153,40 @@ static void server_call_callback(const rc_api_request_t* request,
 // Log message callback
 static void log_message_callback(const char* message, const rc_client_t* client) {
     LOGI("%s", message);
+}
+
+static void client_login_callback(int result, const char* error_message,
+                                  rc_client_t* client, void* userdata) {
+    (void)client;
+    const jlong request_id = (jlong)(intptr_t)userdata;
+
+    if (result == RC_OK) {
+        LOGI("RetroAchievements login successful");
+        notify_session_callback("onLoginResult", request_id, 1, NULL);
+    } else {
+        LOGE("RetroAchievements login failed (%d): %s",
+             result, error_message ? error_message : "unknown error");
+        notify_session_callback("onLoginResult", request_id, 0, error_message);
+    }
+}
+
+static void client_load_game_callback(int result, const char* error_message,
+                                      rc_client_t* client, void* userdata) {
+    const jlong request_id = (jlong)(intptr_t)userdata;
+
+    if (result == RC_OK) {
+        const rc_client_game_t* game = rc_client_get_game_info(client);
+        if (game && game->title) {
+            LOGI("RetroAchievements game loaded: %s", game->title);
+        } else {
+            LOGI("RetroAchievements game loaded");
+        }
+        notify_session_callback("onGameLoadResult", request_id, 1, NULL);
+    } else {
+        LOGE("RetroAchievements game load failed (%d): %s",
+             result, error_message ? error_message : "unknown error");
+        notify_session_callback("onGameLoadResult", request_id, 0, error_message);
+    }
 }
 
 // Initialize rcheevos client
@@ -276,46 +361,66 @@ typedef struct {
 } login_callback_data_t;
 
 // Begin login with token
-JNIEXPORT void JNICALL
+JNIEXPORT jboolean JNICALL
 Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeBeginLoginWithToken(
     JNIEnv* env, jobject thiz, jlong client_ptr, jstring username, jstring token, jlong callback_ptr) {
+    (void)thiz;
     
     rc_client_t* client = (rc_client_t*)(intptr_t)client_ptr;
     if (client == NULL) {
         LOGE("Client is null");
-        return;
+        return JNI_FALSE;
     }
-    
+
+    if (username == NULL || token == NULL) {
+        LOGE("Username or token is null");
+        return JNI_FALSE;
+    }
+
     const char* c_username = (*env)->GetStringUTFChars(env, username, NULL);
     const char* c_token = (*env)->GetStringUTFChars(env, token, NULL);
-    
-    // Note: Full rc_client_begin_login_with_token implementation requires
-    // callback handling which is complex. For now, we'll store credentials
-    // and handle login in Java layer through HTTP calls
-    
-    LOGI("Login requested for user: %s", c_username);
+
+    rc_client_async_handle_t* handle = rc_client_begin_login_with_token(
+        client, c_username, c_token, client_login_callback, (void*)(intptr_t)callback_ptr);
+    if (handle == NULL) {
+        LOGE("Failed to queue login request");
+    } else {
+        LOGI("Login requested for user: %s", c_username);
+    }
     
     (*env)->ReleaseStringUTFChars(env, username, c_username);
     (*env)->ReleaseStringUTFChars(env, token, c_token);
+    return (handle != NULL) ? JNI_TRUE : JNI_FALSE;
 }
 
 // Begin identify and load game
-JNIEXPORT void JNICALL
+JNIEXPORT jboolean JNICALL
 Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeBeginIdentifyAndLoadGame(
     JNIEnv* env, jobject thiz, jlong client_ptr, jint console_id, jstring game_hash, jlong callback_ptr) {
+    (void)thiz;
+    (void)console_id;
     
     rc_client_t* client = (rc_client_t*)(intptr_t)client_ptr;
     if (client == NULL) {
         LOGE("Client is null");
-        return;
+        return JNI_FALSE;
+    }
+
+    if (game_hash == NULL) {
+        LOGE("Game hash is null");
+        return JNI_FALSE;
     }
     
     const char* c_hash = (*env)->GetStringUTFChars(env, game_hash, NULL);
-    
-    // Note: Full rc_client_begin_identify_and_load_game implementation requires
-    // async callback handling. For now, we log the request
-    
-    LOGI("Game identification requested - Console: %d, Hash: %s", console_id, c_hash);
+
+    rc_client_async_handle_t* handle = rc_client_begin_load_game(
+        client, c_hash, client_load_game_callback, (void*)(intptr_t)callback_ptr);
+    if (handle == NULL) {
+        LOGE("Failed to queue game load request");
+    } else {
+        LOGI("Game load requested - Console: %d, Hash: %s", console_id, c_hash);
+    }
     
     (*env)->ReleaseStringUTFChars(env, game_hash, c_hash);
+    return (handle != NULL) ? JNI_TRUE : JNI_FALSE;
 }

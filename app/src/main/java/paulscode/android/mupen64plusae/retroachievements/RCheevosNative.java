@@ -56,6 +56,22 @@ public class RCheevosNative {
          * @param callbackDataPtr Native callback data pointer
          */
         void onServerCall(String url, String postData, long callbackPtr, long callbackDataPtr);
+
+        /**
+         * Called when login request completes.
+         * @param requestId Session request id passed when the login was queued
+         * @param success True if login succeeded
+         * @param errorMessage Error detail when login fails (nullable)
+         */
+        void onLoginResult(long requestId, boolean success, String errorMessage);
+
+        /**
+         * Called when game load request completes.
+         * @param requestId Session request id passed when the load was queued
+         * @param success True if game load succeeded
+         * @param errorMessage Error detail when game load fails (nullable)
+         */
+        void onGameLoadResult(long requestId, boolean success, String errorMessage);
     }
     
     /**
@@ -121,7 +137,7 @@ public class RCheevosNative {
      * @param token API token
      * @param callbackPtr Callback pointer (will be called on completion)
      */
-    public native void nativeBeginLoginWithToken(long clientPtr, String username, String token, long callbackPtr);
+    public native boolean nativeBeginLoginWithToken(long clientPtr, String username, String token, long callbackPtr);
     
     /**
      * Begin identify and load game
@@ -130,5 +146,5 @@ public class RCheevosNative {
      * @param gameHash Game hash string
      * @param callbackPtr Callback pointer (will be called on completion)
      */
-    public native void nativeBeginIdentifyAndLoadGame(long clientPtr, int consoleId, String gameHash, long callbackPtr);
+    public native boolean nativeBeginIdentifyAndLoadGame(long clientPtr, int consoleId, String gameHash, long callbackPtr);
 }

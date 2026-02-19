@@ -18,6 +18,7 @@ import java.util.Map;
  */
 public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback {
     private static final String TAG = "RAManager";
+    private static final int HTTP_STATUS_RETRYABLE_CLIENT_ERROR = -2;
     
     private static RetroAchievementsManager sInstance;
     
@@ -27,14 +28,21 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
     private final RetroAchievementsNotifications mNotifications;
     
     private long mClientPtr = 0;
-    private boolean mInitialized = false;
-    private boolean mShuttingDown = false;
-    private boolean mHardcoreEnabled = false;
+    private volatile boolean mInitialized = false;
+    private volatile boolean mShuttingDown = false;
+    private volatile boolean mHardcoreEnabled = false;
+    private volatile boolean mSessionActive = false;
     private String mUsername;
     private String mToken;
+    private long mSessionRequestCounter = 0;
+    private long mActiveSessionRequestId = 0;
+    private boolean mLoginCompleted = false;
+    private boolean mLoadCompleted = false;
+    private boolean mLoginSucceeded = false;
+    private boolean mLoadSucceeded = false;
     
     // Memory read callback - will be set by CoreService
-    private MemoryReadCallback mMemoryReadCallback;
+    private volatile MemoryReadCallback mMemoryReadCallback;
     
     // Pending HTTP requests (callback data ptr -> callback ptr)
     // Using callbackDataPtr as key since it's unique per request
@@ -95,8 +103,9 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
         // Set callback handler
         mNative.nativeSetCallbackHandler(this);
         
-        mInitialized = false;
+        mInitialized = true;
         mShuttingDown = false;
+        clearSessionRequestStateLocked();
         Log.i(TAG, "RetroAchievements initialized successfully");
         return true;
     }
@@ -127,6 +136,8 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
             mHttpClient = null;
         }
         
+        mMemoryReadCallback = null;
+        clearSessionRequestStateLocked();
         mInitialized = false;
         Log.i(TAG, "RetroAchievements shut down");
     }
@@ -160,6 +171,13 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
     public boolean isHardcoreEnabled() {
         return mHardcoreEnabled;
     }
+
+    /**
+     * Check if hardcore restrictions should be enforced for the current session.
+     */
+    public boolean isHardcoreSessionActive() {
+        return mHardcoreEnabled && mInitialized && mSessionActive && isLoggedIn();
+    }
     
     /**
      * Generate hash for a ROM file
@@ -186,13 +204,84 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
         int consoleId = mNative.nativeGetN64ConsoleId();
         return mNative.nativeGenerateHash(consoleId, null, romData);
     }
+
+    /**
+     * Start a RetroAchievements game session for the provided ROM.
+     */
+    public synchronized boolean startSession(String romPath) {
+        return startSession(romPath, null);
+    }
+
+    /**
+     * Start a RetroAchievements game session for the provided ROM.
+     */
+    public synchronized boolean startSession(String romPath, byte[] romData) {
+        if (!mInitialized || mClientPtr == 0) {
+            Log.w(TAG, "Not initialized, cannot start session");
+            return false;
+        }
+
+        if (!isLoggedIn()) {
+            Log.w(TAG, "No credentials set, cannot start session");
+            return false;
+        }
+
+        String gameHash = null;
+        if (romData != null && romData.length > 0) {
+            gameHash = generateHash(romData);
+            if (gameHash == null || gameHash.isEmpty()) {
+                Log.w(TAG, "Failed to generate game hash from ROM data, falling back to path");
+            }
+        }
+
+        if ((gameHash == null || gameHash.isEmpty()) && romPath != null && !romPath.isEmpty()) {
+            gameHash = generateHash(romPath);
+        }
+
+        if (gameHash == null || gameHash.isEmpty()) {
+            Log.w(TAG, "Failed to generate game hash");
+            return false;
+        }
+
+        try {
+            long requestId = ++mSessionRequestCounter;
+            resetSessionRequestStateLocked(requestId);
+
+            boolean loginQueued = mNative.nativeBeginLoginWithToken(mClientPtr, mUsername, mToken, requestId);
+            boolean loadQueued = mNative.nativeBeginIdentifyAndLoadGame(
+                    mClientPtr, mNative.nativeGetN64ConsoleId(), gameHash, requestId);
+
+            if (!loginQueued || !loadQueued) {
+                // Mark unqueued operations as failed so any callback from the queued operation cannot
+                // accidentally transition this request to active.
+                if (!loginQueued) {
+                    mLoginCompleted = true;
+                    mLoginSucceeded = false;
+                }
+                if (!loadQueued) {
+                    mLoadCompleted = true;
+                    mLoadSucceeded = false;
+                }
+                mSessionActive = false;
+                Log.w(TAG, "Failed to queue RetroAchievements session request");
+                return false;
+            }
+
+            Log.i(TAG, "RetroAchievements session queued for hash: " + gameHash + " (request " + requestId + ")");
+            return true;
+        } catch (RuntimeException e) {
+            Log.e(TAG, "Failed to start RetroAchievements session", e);
+            clearSessionRequestStateLocked();
+            return false;
+        }
+    }
     
     /**
      * Process achievements - should be called periodically during emulation
      * Currently called every 500ms via CoreService periodic handler
      */
     public void doFrame() {
-        if (mInitialized && mClientPtr != 0) {
+        if (mInitialized && mClientPtr != 0 && mSessionActive) {
             mNative.nativeDoFrame(mClientPtr);
         }
     }
@@ -200,10 +289,15 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
     /**
      * Set user credentials
      */
-    public void setCredentials(String username, String token) {
+    public synchronized void setCredentials(String username, String token) {
         mUsername = username;
         mToken = token;
-        Log.i(TAG, "Credentials set for user: " + username);
+        clearSessionRequestStateLocked();
+        if (username == null || token == null) {
+            Log.i(TAG, "Credentials cleared");
+        } else {
+            Log.i(TAG, "Credentials set for user: " + username);
+        }
     }
     
     /**
@@ -281,12 +375,17 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
                 }
                 
                 Log.e(TAG, "Server error: " + errorMessage);
+                String safeErrorMessage = errorMessage != null ? errorMessage : "Client request failed";
                 
-                // Remove from pending and deliver error (status code 0)
+                // Remove from pending and deliver a client transport error for proper retry handling.
                 synchronized (mPendingRequests) {
                     Long storedCallbackPtr = mPendingRequests.remove(callbackDataPtr);
                     if (storedCallbackPtr != null) {
-                        mNative.nativeServerResponse(storedCallbackPtr, callbackDataPtr, 0, errorMessage);
+                        mNative.nativeServerResponse(
+                                storedCallbackPtr,
+                                callbackDataPtr,
+                                HTTP_STATUS_RETRYABLE_CLIENT_ERROR,
+                                safeErrorMessage);
                     }
                 }
             }
@@ -302,5 +401,66 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
         } else {
             Log.e(TAG, "HttpClient is null, cannot make request");
         }
+    }
+
+    @Override
+    public synchronized void onLoginResult(long requestId, boolean success, String errorMessage) {
+        if (!isActiveSessionRequestLocked(requestId)) {
+            return;
+        }
+
+        mLoginCompleted = true;
+        mLoginSucceeded = success;
+        updateSessionActiveLocked();
+
+        if (success) {
+            Log.i(TAG, "RetroAchievements login succeeded (request " + requestId + ")");
+        } else {
+            Log.w(TAG, "RetroAchievements login failed (request " + requestId + "): " + errorMessage);
+        }
+    }
+
+    @Override
+    public synchronized void onGameLoadResult(long requestId, boolean success, String errorMessage) {
+        if (!isActiveSessionRequestLocked(requestId)) {
+            return;
+        }
+
+        mLoadCompleted = true;
+        mLoadSucceeded = success;
+        updateSessionActiveLocked();
+
+        if (success) {
+            Log.i(TAG, "RetroAchievements game load succeeded (request " + requestId + ")");
+        } else {
+            Log.w(TAG, "RetroAchievements game load failed (request " + requestId + "): " + errorMessage);
+        }
+    }
+
+    private void resetSessionRequestStateLocked(long requestId) {
+        mActiveSessionRequestId = requestId;
+        mLoginCompleted = false;
+        mLoadCompleted = false;
+        mLoginSucceeded = false;
+        mLoadSucceeded = false;
+        mSessionActive = false;
+    }
+
+    private void clearSessionRequestStateLocked() {
+        mActiveSessionRequestId = 0;
+        mLoginCompleted = false;
+        mLoadCompleted = false;
+        mLoginSucceeded = false;
+        mLoadSucceeded = false;
+        mSessionActive = false;
+    }
+
+    private boolean isActiveSessionRequestLocked(long requestId) {
+        return requestId != 0 && requestId == mActiveSessionRequestId && mInitialized && !mShuttingDown;
+    }
+
+    private void updateSessionActiveLocked() {
+        // A session is active only after both async operations have completed successfully.
+        mSessionActive = mLoginCompleted && mLoadCompleted && mLoginSucceeded && mLoadSucceeded;
     }
 }

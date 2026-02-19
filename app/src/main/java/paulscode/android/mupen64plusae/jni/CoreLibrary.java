@@ -55,6 +55,13 @@ public interface CoreLibrary extends Library {
      */
     int CoreDoCommand(int Command, int ParamInt, Pointer ParamPtr);
 
+    /*
+     * DebugMemGetPointer()
+     *
+     * Returns pointers to internal emulator memory regions.
+     */
+    Pointer DebugMemGetPointer(int memPtrType);
+
     /* CoreAddCheat()
      *
      * This function will add a Cheat Function to a list of currently active cheats

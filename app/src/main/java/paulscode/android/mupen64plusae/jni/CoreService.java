@@ -73,7 +73,8 @@ import paulscode.android.mupen64plusae.util.PixelBuffer;
 import paulscode.android.mupen64plusae.util.RomHeader;
 
 @SuppressWarnings({"unused", "RedundantSuppression"})
-public class CoreService extends Service implements CoreInterface.OnFpsChangedListener, RaphnetControllerHandler.DeviceReadyListener {
+public class CoreService extends Service implements CoreInterface.OnFpsChangedListener,
+        CoreInterface.OnFrameRenderedListener, RaphnetControllerHandler.DeviceReadyListener {
 
     interface CoreServiceListener
     {
@@ -393,6 +394,11 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
         return NUM_SLOTS;
     }
 
+    private boolean isRetroAchievementsHardcoreActive()
+    {
+        return mRetroAchievementsManager != null && mRetroAchievementsManager.isHardcoreSessionActive();
+    }
+
     void saveSlot()
     {
         // Hardcore mode: saving is allowed (for practice), but loading is not
@@ -402,7 +408,7 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
     void loadSlot()
     {
         // Hardcore mode: prevent loading save states
-        if (mRetroAchievementsManager != null && mRetroAchievementsManager.isHardcoreEnabled()) {
+        if (isRetroAchievementsHardcoreActive()) {
             Log.w(TAG, "RetroAchievements: Save state loading disabled in Hardcore mode");
             if (mListener != null) {
                 // Could show a toast here
@@ -415,7 +421,7 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
     void loadState(File file)
     {
         // Hardcore mode: prevent loading save states
-        if (mRetroAchievementsManager != null && mRetroAchievementsManager.isHardcoreEnabled()) {
+        if (isRetroAchievementsHardcoreActive()) {
             Log.w(TAG, "RetroAchievements: Save state loading disabled in Hardcore mode");
             return;
         }
@@ -714,6 +720,32 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
             }
 
             if (loadingSuccess) {
+                byte[] loadedRomDataForAchievements = mCoreInterface.consumeLoadedRomDataForHash();
+                String achievementHashPath = !TextUtils.isEmpty(mZipPath) ? mZipPath : mRomPath;
+                if (isNdd) {
+                    // 64DD boots with a bundled test ROM; hash the copied local disk file instead.
+                    loadedRomDataForAchievements = null;
+                    String localDdDiskPath = mCoreInterface.getDdDiskPath();
+                    if (!TextUtils.isEmpty(localDdDiskPath) && new File(localDdDiskPath).exists()) {
+                        achievementHashPath = localDdDiskPath;
+                    }
+                }
+
+                // Start RetroAchievements session if enabled and credentials are present.
+                if (mRetroAchievementsManager != null && mRetroAchievementsManager.isLoggedIn()) {
+                    try {
+                        boolean started = mRetroAchievementsManager.startSession(
+                                achievementHashPath,
+                                loadedRomDataForAchievements);
+                        if (!started) {
+                            Log.w(TAG, "RetroAchievements: Failed to start game session");
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "RetroAchievements: Error starting session", e);
+                    }
+                }
+
+                boolean hardcoreSessionActive = isRetroAchievementsHardcoreActive();
 
                 if (mUsingNetplay) {
                     mCoreInterface.emuSetFramelimiter(true);
@@ -721,11 +753,8 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
                 } else {
                     mCoreInterface.emuSetFramelimiter(mGlobalPrefs.isFramelimiterEnabled);
 
-                    // Hardcore mode: disable cheats
-                    boolean hardcoreEnabled = mRetroAchievementsManager != null && 
-                                            mRetroAchievementsManager.isHardcoreEnabled();
-
-                    if (!hardcoreEnabled) {
+                    // Hardcore mode: disable cheats only when an RA session is active.
+                    if (!hardcoreSessionActive) {
                         for (GamePrefs.CheatSelection selection : mGamePrefs.getEnabledCheats())
                         {
                             if (selection.getIndex() < mCheats.size()) {
@@ -745,27 +774,13 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
                     mListener.onCoreServiceStarted();
                 }
 
-                // Start RetroAchievements session if enabled
-                if (mRetroAchievementsManager != null && mRetroAchievementsManager.isLoggedIn()) {
-                    try {
-                        String raHash = mRetroAchievementsManager.generateHash(mRomPath);
-                        if (raHash != null && !raHash.isEmpty()) {
-                            Log.i(TAG, "RetroAchievements: Game hash generated: " + raHash);
-                            // Note: Full game loading with rc_client_begin_identify_and_load_game
-                            // will be implemented in native layer extensions
-                        } else {
-                            Log.w(TAG, "RetroAchievements: Failed to generate game hash");
-                        }
-                    } catch (Exception e) {
-                        Log.e(TAG, "RetroAchievements: Error generating hash", e);
-                    }
-                }
-
                 if (!mIsShuttingDown) {
-                    if (!mIsRestarting)
+                    if (!mIsRestarting && !hardcoreSessionActive)
                     {
                         final String latestSave = mGameDataManager.getLatestAutoSave();
                         mCoreInterface.emuLoadFile(latestSave);
+                    } else if (!mIsRestarting && hardcoreSessionActive) {
+                        Log.i(TAG, "RetroAchievements: Skipping autosave load in Hardcore mode");
                     }
 
                     // This call blocks until emulation is stopped
@@ -783,6 +798,8 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
                 mCoreInterface.coreDetachPlugin(CoreTypes.m64p_plugin_type.M64PLUGIN_INPUT);
 
                 mCoreInterface.writeGbRamData(getApplicationContext(), gbRamPaths);
+            } else {
+                mCoreInterface.consumeLoadedRomDataForHash();
             }
 
             // Clean up the working directory
@@ -953,6 +970,10 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
         if (mAppData.isRetroAchievementsEnabled()) {
             mRetroAchievementsManager = RetroAchievementsManager.getInstance(this);
             if (mRetroAchievementsManager.initialize()) {
+                mRetroAchievementsManager.setMemoryReadCallback(
+                        (address, buffer, numBytes) ->
+                                mCoreInterface.readMemory(address, buffer, numBytes));
+
                 // Set hardcore mode
                 mRetroAchievementsManager.setHardcoreEnabled(mAppData.isRetroAchievementsHardcore());
                 
@@ -1115,6 +1136,9 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
             // Load the native libraries, this must be done outside the thread to prevent race conditions
             // that depend on the libraries being loaded after this call is made
             mCoreInterface.addOnFpsChangedListener( CoreService.this, 15, mCoreInterface );
+            if (mRetroAchievementsManager != null) {
+                mCoreInterface.addOnFrameRenderedListener(CoreService.this);
+            }
 
             mRaphnetHandler = new RaphnetControllerHandler(getBaseContext(), this);
 
@@ -1147,8 +1171,12 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
     {
         Log.i(TAG, "onDestroy");
 
+        mCoreInterface.removeOnFrameRenderedListener(this);
+        mCoreInterface.removeOnFpsChangedListener(this);
+
         // Shutdown RetroAchievements
         if (mRetroAchievementsManager != null) {
+            mRetroAchievementsManager.setMemoryReadCallback(null);
             mRetroAchievementsManager.shutdown();
             mRetroAchievementsManager = null;
         }
@@ -1244,15 +1272,6 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
                 }
             }
 
-            // Call RetroAchievements frame processing
-            if (mRetroAchievementsManager != null && mIsRunning && !mIsPaused) {
-                try {
-                    mRetroAchievementsManager.doFrame();
-                } catch (Exception e) {
-                    Log.e(TAG, "RetroAchievements: Error in doFrame", e);
-                }
-            }
-
             mPeriodicActionHandler.removeCallbacks(mPeriodicAction);
             mPeriodicActionHandler.postDelayed(mPeriodicAction, 500);
         }
@@ -1284,6 +1303,17 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
 
         if (mListener != null) {
             mListener.onFpsChanged(newValue);
+        }
+    }
+
+    @Override
+    public void onFrameRendered() {
+        if (mRetroAchievementsManager != null && mIsRunning && !mIsPaused) {
+            try {
+                mRetroAchievementsManager.doFrame();
+            } catch (Exception e) {
+                Log.e(TAG, "RetroAchievements: Error in doFrame", e);
+            }
         }
     }
 }
