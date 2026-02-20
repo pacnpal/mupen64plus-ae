@@ -113,10 +113,11 @@ jobs:
       env:
         SHA: ${{ steps.short-sha.outputs.sha }}
 
-    - name: Re-zip artifacts
+    - name: Re-zip artifacts and copy APK
       run: |
         cd dist
         zip -r mupen64plus-ae-${{ steps.var.outputs.branch }}.zip mupen64plus-ae*
+        cp mupen64plus-ae-*/*-release.apk .
 
     - name: Update Git Tag
       run: |
@@ -131,4 +132,4 @@ jobs:
         removeArtifacts: true
         replacesArtifacts: false
         tag: Pre-release
-        artifacts: "dist/*.zip"
+        artifacts: "dist/*.zip,dist/*.apk"
