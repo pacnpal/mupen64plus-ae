@@ -22,6 +22,7 @@ import java.util.List;
 
 public class AchievementListDialogFragment extends DialogFragment {
     public static final String FRAGMENT_TAG = "AchievementListDialogFragment";
+    private AchievementBadgeCache mBadgeCache;
 
     public static AchievementListDialogFragment newInstance() {
         return new AchievementListDialogFragment();
@@ -72,8 +73,11 @@ public class AchievementListDialogFragment extends DialogFragment {
             return;
         }
 
-        AchievementBadgeCache badgeCache = new AchievementBadgeCache(requireContext());
-        AchievementListAdapter adapter = new AchievementListAdapter(items, badgeCache);
+        if (mBadgeCache != null) {
+            mBadgeCache.shutdown();
+        }
+        mBadgeCache = new AchievementBadgeCache(requireContext());
+        AchievementListAdapter adapter = new AchievementListAdapter(items, mBadgeCache);
 
         recyclerView.setLayoutManager(new LinearLayoutManager(requireContext()));
         recyclerView.setAdapter(adapter);
@@ -96,5 +100,14 @@ public class AchievementListDialogFragment extends DialogFragment {
                     WindowManager.LayoutParams.MATCH_PARENT,
                     WindowManager.LayoutParams.MATCH_PARENT);
         }
+    }
+
+    @Override
+    public void onDestroyView() {
+        if (mBadgeCache != null) {
+            mBadgeCache.shutdown();
+            mBadgeCache = null;
+        }
+        super.onDestroyView();
     }
 }

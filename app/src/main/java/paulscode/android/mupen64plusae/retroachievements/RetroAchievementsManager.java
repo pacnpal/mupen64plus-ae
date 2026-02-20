@@ -615,8 +615,12 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
      * @param data Byte array previously returned by serializeProgress()
      * @return true if deserialization succeeded
      */
-    public boolean deserializeProgress(byte[] data) {
-        if (!mInitialized || mClientPtr == 0 || !mSessionActive || data == null) return false;
+    public synchronized boolean deserializeProgress(byte[] data) {
+        if (!mInitialized || mClientPtr == 0 || data == null) return false;
+        final boolean sessionStarting = mActiveSessionRequestId != 0 && (!mLoginCompleted || !mLoadCompleted);
+        final boolean sessionFailed = (mLoginCompleted && !mLoginSucceeded)
+                || (mLoadCompleted && !mLoadSucceeded);
+        if (!mSessionActive && (!sessionStarting || sessionFailed)) return false;
         return mNative.nativeDeserializeProgress(mClientPtr, data);
     }
 

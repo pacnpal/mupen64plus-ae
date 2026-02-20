@@ -886,44 +886,72 @@ typedef struct {
     char* buf;
     size_t len;
     size_t cap;
+    int failed;
 } json_buf_t;
 
-static void json_buf_ensure(json_buf_t* jb, size_t extra) {
-    if (jb->len + extra >= jb->cap) {
-        size_t new_cap = (jb->cap + extra) * 2;
-        char* new_buf = (char*)realloc(jb->buf, new_cap);
-        if (new_buf == NULL) return;
-        jb->buf = new_buf;
-        jb->cap = new_cap;
+static int json_buf_ensure(json_buf_t* jb, size_t extra) {
+    if (jb->failed) return 0;
+
+    if (extra > ((size_t)-1) - jb->len - 1) {
+        jb->failed = 1;
+        return 0;
     }
+
+    size_t required = jb->len + extra + 1;
+    if (required <= jb->cap) {
+        return 1;
+    }
+
+    size_t new_cap = jb->cap ? jb->cap : 64;
+    while (new_cap < required) {
+        size_t grown = new_cap * 2;
+        if (grown < new_cap) {
+            new_cap = required;
+            break;
+        }
+        new_cap = grown;
+    }
+
+    char* new_buf = (char*)realloc(jb->buf, new_cap);
+    if (new_buf == NULL) {
+        jb->failed = 1;
+        return 0;
+    }
+
+    jb->buf = new_buf;
+    jb->cap = new_cap;
+    return 1;
 }
 
-static void json_buf_append(json_buf_t* jb, const char* str) {
+static int json_buf_append(json_buf_t* jb, const char* str) {
     size_t slen = strlen(str);
-    json_buf_ensure(jb, slen + 1);
+    if (!json_buf_ensure(jb, slen)) {
+        return 0;
+    }
     memcpy(jb->buf + jb->len, str, slen);
     jb->len += slen;
     jb->buf[jb->len] = '\0';
+    return 1;
 }
 
-static void json_buf_append_escaped(json_buf_t* jb, const char* str) {
-    if (str == NULL) { json_buf_append(jb, "null"); return; }
-    json_buf_append(jb, "\"");
+static int json_buf_append_escaped(json_buf_t* jb, const char* str) {
+    if (str == NULL) return json_buf_append(jb, "null");
+    if (!json_buf_append(jb, "\"")) return 0;
     for (const char* p = str; *p; ++p) {
         switch (*p) {
-            case '"':  json_buf_append(jb, "\\\""); break;
-            case '\\': json_buf_append(jb, "\\\\"); break;
-            case '\n': json_buf_append(jb, "\\n"); break;
-            case '\r': json_buf_append(jb, "\\r"); break;
-            case '\t': json_buf_append(jb, "\\t"); break;
+            case '"':  if (!json_buf_append(jb, "\\\"")) return 0; break;
+            case '\\': if (!json_buf_append(jb, "\\\\")) return 0; break;
+            case '\n': if (!json_buf_append(jb, "\\n")) return 0; break;
+            case '\r': if (!json_buf_append(jb, "\\r")) return 0; break;
+            case '\t': if (!json_buf_append(jb, "\\t")) return 0; break;
             default: {
-                json_buf_ensure(jb, 2);
+                if (!json_buf_ensure(jb, 1)) return 0;
                 jb->buf[jb->len++] = *p;
                 jb->buf[jb->len] = '\0';
             }
         }
     }
-    json_buf_append(jb, "\"");
+    return json_buf_append(jb, "\"");
 }
 
 // Get achievement list as JSON string
@@ -950,70 +978,78 @@ Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeGetA
     }
     jb.buf[0] = '\0';
 
-    json_buf_append(&jb, "{\"buckets\":[");
+#define JSON_APPEND_OR_FAIL(expr) do { if (!(expr)) goto json_build_failed; } while (0)
+    JSON_APPEND_OR_FAIL(json_buf_append(&jb, "{\"buckets\":["));
 
     int first_bucket = 1;
     for (uint32_t i = 0; i < list->num_buckets; ++i) {
         const rc_client_achievement_bucket_t* bucket = &list->buckets[i];
         if (bucket->num_achievements == 0) continue;
 
-        if (!first_bucket) json_buf_append(&jb, ",");
+        if (!first_bucket) JSON_APPEND_OR_FAIL(json_buf_append(&jb, ","));
         first_bucket = 0;
 
-        json_buf_append(&jb, "{\"label\":");
-        json_buf_append_escaped(&jb, bucket->label);
+        JSON_APPEND_OR_FAIL(json_buf_append(&jb, "{\"label\":"));
+        JSON_APPEND_OR_FAIL(json_buf_append_escaped(&jb, bucket->label));
 
         char tmp[128];
         snprintf(tmp, sizeof(tmp), ",\"bucket_type\":%u,\"achievements\":[",
                  (unsigned)bucket->bucket_type);
-        json_buf_append(&jb, tmp);
+        JSON_APPEND_OR_FAIL(json_buf_append(&jb, tmp));
 
         for (uint32_t j = 0; j < bucket->num_achievements; ++j) {
             const rc_client_achievement_t* ach = bucket->achievements[j];
-            if (j > 0) json_buf_append(&jb, ",");
+            if (j > 0) JSON_APPEND_OR_FAIL(json_buf_append(&jb, ","));
 
-            json_buf_append(&jb, "{\"id\":");
+            JSON_APPEND_OR_FAIL(json_buf_append(&jb, "{\"id\":"));
             snprintf(tmp, sizeof(tmp), "%u", (unsigned)ach->id);
-            json_buf_append(&jb, tmp);
+            JSON_APPEND_OR_FAIL(json_buf_append(&jb, tmp));
 
-            json_buf_append(&jb, ",\"title\":");
-            json_buf_append_escaped(&jb, ach->title);
+            JSON_APPEND_OR_FAIL(json_buf_append(&jb, ",\"title\":"));
+            JSON_APPEND_OR_FAIL(json_buf_append_escaped(&jb, ach->title));
 
-            json_buf_append(&jb, ",\"description\":");
-            json_buf_append_escaped(&jb, ach->description);
+            JSON_APPEND_OR_FAIL(json_buf_append(&jb, ",\"description\":"));
+            JSON_APPEND_OR_FAIL(json_buf_append_escaped(&jb, ach->description));
 
-            json_buf_append(&jb, ",\"badge_url\":");
-            json_buf_append_escaped(&jb, ach->badge_url);
+            JSON_APPEND_OR_FAIL(json_buf_append(&jb, ",\"badge_url\":"));
+            JSON_APPEND_OR_FAIL(json_buf_append_escaped(&jb, ach->badge_url));
 
-            json_buf_append(&jb, ",\"badge_locked_url\":");
-            json_buf_append_escaped(&jb, ach->badge_locked_url);
+            JSON_APPEND_OR_FAIL(json_buf_append(&jb, ",\"badge_locked_url\":"));
+            JSON_APPEND_OR_FAIL(json_buf_append_escaped(&jb, ach->badge_locked_url));
 
             snprintf(tmp, sizeof(tmp),
                      ",\"points\":%u,\"state\":%u,\"unlocked\":%u",
                      (unsigned)ach->points, (unsigned)ach->state,
                      (unsigned)ach->unlocked);
-            json_buf_append(&jb, tmp);
+            JSON_APPEND_OR_FAIL(json_buf_append(&jb, tmp));
 
-            json_buf_append(&jb, ",\"measured_progress\":");
-            json_buf_append_escaped(&jb, ach->measured_progress);
+            JSON_APPEND_OR_FAIL(json_buf_append(&jb, ",\"measured_progress\":"));
+            JSON_APPEND_OR_FAIL(json_buf_append_escaped(&jb, ach->measured_progress));
 
             snprintf(tmp, sizeof(tmp),
                      ",\"measured_percent\":%.1f,\"rarity\":%.1f,\"rarity_hardcore\":%.1f,\"type\":%u,\"unlock_time\":%ld",
                      ach->measured_percent, ach->rarity, ach->rarity_hardcore,
                      (unsigned)ach->type, (long)ach->unlock_time);
-            json_buf_append(&jb, tmp);
+            JSON_APPEND_OR_FAIL(json_buf_append(&jb, tmp));
 
-            json_buf_append(&jb, "}");
+            JSON_APPEND_OR_FAIL(json_buf_append(&jb, "}"));
         }
 
-        json_buf_append(&jb, "]}");
+        JSON_APPEND_OR_FAIL(json_buf_append(&jb, "]}"));
     }
 
-    json_buf_append(&jb, "]}");
-
-    rc_client_destroy_achievement_list(list);
+    JSON_APPEND_OR_FAIL(json_buf_append(&jb, "]}"));
 
     jstring result = safe_new_string_utf(env, jb.buf);
+    rc_client_destroy_achievement_list(list);
     free(jb.buf);
+#undef JSON_APPEND_OR_FAIL
     return result;
+
+json_build_failed:
+    LOGE("Failed to build achievement list JSON");
+    rc_client_destroy_achievement_list(list);
+    free(jb.buf);
+#undef JSON_APPEND_OR_FAIL
+    return NULL;
 }

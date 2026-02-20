@@ -63,6 +63,7 @@ public class AchievementOverlayView extends FrameLayout {
     private final SparseArray<ImageView> mChallengeViews = new SparseArray<>();
 
     private AchievementBadgeCache mBadgeCache;
+    private int mPopupBadgeRequestToken = 0;
 
     public AchievementOverlayView(Context context) {
         super(context);
@@ -231,7 +232,7 @@ public class AchievementOverlayView extends FrameLayout {
             mProgressText.setVisibility(View.VISIBLE);
             mProgressBar.setProgress(Math.round(measuredPercent));
             mProgressBar.setVisibility(View.VISIBLE);
-            mBadgeImage.setImageBitmap(null);
+            clearPopupBadge();
             showPopup();
         });
     }
@@ -249,7 +250,7 @@ public class AchievementOverlayView extends FrameLayout {
             mPointsText.setVisibility(View.GONE);
             mProgressBar.setVisibility(View.GONE);
             mProgressText.setVisibility(View.GONE);
-            mBadgeImage.setImageBitmap(null);
+            clearPopupBadge();
             showPopup();
         });
     }
@@ -281,7 +282,7 @@ public class AchievementOverlayView extends FrameLayout {
             mPointsText.setVisibility(View.GONE);
             mProgressBar.setVisibility(View.GONE);
             mProgressText.setVisibility(View.GONE);
-            mBadgeImage.setImageBitmap(null);
+            clearPopupBadge();
             showPopup();
         });
     }
@@ -297,7 +298,7 @@ public class AchievementOverlayView extends FrameLayout {
             mPointsText.setVisibility(View.GONE);
             mProgressBar.setVisibility(View.GONE);
             mProgressText.setVisibility(View.GONE);
-            mBadgeImage.setImageBitmap(null);
+            clearPopupBadge();
             showPopup();
         });
     }
@@ -311,7 +312,7 @@ public class AchievementOverlayView extends FrameLayout {
             mPointsText.setVisibility(View.GONE);
             mProgressBar.setVisibility(View.GONE);
             mProgressText.setVisibility(View.GONE);
-            mBadgeImage.setImageBitmap(null);
+            clearPopupBadge();
             showPopup();
         });
     }
@@ -331,7 +332,7 @@ public class AchievementOverlayView extends FrameLayout {
             mPointsText.setVisibility(View.GONE);
             mProgressBar.setVisibility(View.GONE);
             mProgressText.setVisibility(View.GONE);
-            mBadgeImage.setImageBitmap(null);
+            clearPopupBadge();
             showPopup();
         });
     }
@@ -419,13 +420,22 @@ public class AchievementOverlayView extends FrameLayout {
 
     // ========== Internal helpers ==========
 
+    private void clearPopupBadge() {
+        mPopupBadgeRequestToken++;
+        mBadgeImage.setImageBitmap(null);
+    }
+
     private void loadBadge(String badgeUrl) {
+        final int requestToken = ++mPopupBadgeRequestToken;
+        mBadgeImage.setImageBitmap(null);
         if (badgeUrl == null || badgeUrl.isEmpty()) {
-            mBadgeImage.setImageBitmap(null);
             return;
         }
         mBadgeCache.getBadge(badgeUrl, bitmap -> {
             mHandler.post(() -> {
+                if (requestToken != mPopupBadgeRequestToken) {
+                    return;
+                }
                 if (bitmap != null && mPopupContainer.getVisibility() == View.VISIBLE) {
                     mBadgeImage.setImageBitmap(bitmap);
                 }
@@ -469,7 +479,7 @@ public class AchievementOverlayView extends FrameLayout {
                     @Override
                     public void onAnimationEnd(Animator animation) {
                         mPopupContainer.setVisibility(View.GONE);
-                        mBadgeImage.setImageBitmap(null);
+                        clearPopupBadge();
                         resetPopupBackground();
                         mIsShowing = false;
                         processQueue();
