@@ -135,14 +135,36 @@ public class RetroAchievementsPrefsActivity extends AppCompatPreferenceActivity
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle(R.string.retroachievements_login_title);
 
-        // Create layout with username and token fields
+        // Create layout with username and credential fields
         final EditText usernameInput = new EditText(this);
         usernameInput.setHint(R.string.retroachievements_username_hint);
         usernameInput.setInputType(InputType.TYPE_CLASS_TEXT);
 
-        final EditText tokenInput = new EditText(this);
-        tokenInput.setHint(R.string.retroachievements_token_hint);
-        tokenInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        final EditText credentialInput = new EditText(this);
+        credentialInput.setHint(R.string.retroachievements_password_hint);
+        credentialInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+
+        final android.widget.RadioGroup loginModeGroup = new android.widget.RadioGroup(this);
+        loginModeGroup.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+
+        final android.widget.RadioButton passwordModeButton = new android.widget.RadioButton(this);
+        passwordModeButton.setId(android.view.View.generateViewId());
+        passwordModeButton.setText(R.string.retroachievements_login_mode_password);
+        passwordModeButton.setChecked(true);
+
+        final android.widget.RadioButton tokenModeButton = new android.widget.RadioButton(this);
+        tokenModeButton.setId(android.view.View.generateViewId());
+        tokenModeButton.setText(R.string.retroachievements_login_mode_token);
+
+        loginModeGroup.addView(passwordModeButton);
+        loginModeGroup.addView(tokenModeButton);
+        loginModeGroup.setOnCheckedChangeListener((group, checkedId) -> {
+            if (checkedId == tokenModeButton.getId()) {
+                credentialInput.setHint(R.string.retroachievements_token_hint);
+            } else {
+                credentialInput.setHint(R.string.retroachievements_password_hint);
+            }
+        });
 
         // Simple linear layout for inputs
         android.widget.LinearLayout layout = new android.widget.LinearLayout(this);
@@ -155,35 +177,45 @@ public class RetroAchievementsPrefsActivity extends AppCompatPreferenceActivity
         layout.setPadding(paddingPx, paddingPx, paddingPx, paddingPx / 2);
         
         layout.addView(usernameInput);
-        layout.addView(tokenInput);
+        layout.addView(loginModeGroup);
+        layout.addView(credentialInput);
 
         builder.setView(layout);
 
         builder.setPositiveButton(R.string.retroachievements_login, (dialog, which) -> {
             String username = usernameInput.getText().toString().trim();
-            String token = tokenInput.getText().toString().trim();
+            String credential = credentialInput.getText().toString().trim();
+            boolean useToken = loginModeGroup.getCheckedRadioButtonId() == tokenModeButton.getId();
 
-            if (username.isEmpty() || token.isEmpty()) {
+            if (username.isEmpty() || credential.isEmpty()) {
                 Toast.makeText(this, R.string.retroachievements_login_empty, Toast.LENGTH_SHORT).show();
                 return;
             }
 
-            performLogin(username, token);
+            performLogin(username, credential, useToken);
         });
 
         builder.setNegativeButton(android.R.string.cancel, null);
         builder.show();
     }
 
-    private void performLogin(String username, String token) {
+    private void performLogin(String username, String credential, boolean useToken) {
         // Save credentials
         mAppData.setRetroAchievementsUsername(username);
-        mAppData.setRetroAchievementsToken(token);
+        if (useToken) {
+            mAppData.setRetroAchievementsToken(credential);
+        } else {
+            mAppData.setRetroAchievementsPassword(credential);
+        }
         mAppData.setRetroAchievementsEnabled(true);
 
         // Update manager
         RetroAchievementsManager manager = RetroAchievementsManager.getInstance(this);
-        manager.setCredentials(username, token);
+        if (useToken) {
+            manager.setTokenCredentials(username, credential);
+        } else {
+            manager.setCredentials(username, credential);
+        }
 
         Toast.makeText(this, getString(R.string.retroachievements_login_success, username),
                 Toast.LENGTH_LONG).show();
@@ -208,8 +240,9 @@ public class RetroAchievementsPrefsActivity extends AppCompatPreferenceActivity
     }
 
     private void updateLoginState() {
-        boolean isLoggedIn = mAppData.getRetroAchievementsUsername() != null &&
-                mAppData.getRetroAchievementsToken() != null;
+        boolean hasCredentials = mAppData.getRetroAchievementsPassword() != null
+                || mAppData.getRetroAchievementsToken() != null;
+        boolean isLoggedIn = mAppData.getRetroAchievementsUsername() != null && hasCredentials;
         boolean isEnabled = mAppData.isRetroAchievementsEnabled();
 
         if (mLoginPreference != null) {

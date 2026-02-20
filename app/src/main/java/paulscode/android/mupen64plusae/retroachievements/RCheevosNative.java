@@ -140,6 +140,15 @@ public class RCheevosNative {
     public native boolean nativeBeginLoginWithToken(long clientPtr, String username, String token, long callbackPtr);
     
     /**
+     * Begin login with password
+     * @param clientPtr Client pointer
+     * @param username Username
+     * @param password Password
+     * @param callbackPtr Callback pointer (will be called on completion)
+     */
+    public native boolean nativeBeginLoginWithPassword(long clientPtr, String username, String password, long callbackPtr);
+
+    /**
      * Begin identify and load game
      * @param clientPtr Client pointer
      * @param consoleId Console ID

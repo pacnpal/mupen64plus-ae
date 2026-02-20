@@ -393,6 +393,39 @@ Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeBegi
     return (handle != NULL) ? JNI_TRUE : JNI_FALSE;
 }
 
+// Begin login with password
+JNIEXPORT jboolean JNICALL
+Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeBeginLoginWithPassword(
+    JNIEnv* env, jobject thiz, jlong client_ptr, jstring username, jstring password, jlong callback_ptr) {
+    (void)thiz;
+
+    rc_client_t* client = (rc_client_t*)(intptr_t)client_ptr;
+    if (client == NULL) {
+        LOGE("Client is null");
+        return JNI_FALSE;
+    }
+
+    if (username == NULL || password == NULL) {
+        LOGE("Username or password is null");
+        return JNI_FALSE;
+    }
+
+    const char* c_username = (*env)->GetStringUTFChars(env, username, NULL);
+    const char* c_password = (*env)->GetStringUTFChars(env, password, NULL);
+
+    rc_client_async_handle_t* handle = rc_client_begin_login_with_password(
+        client, c_username, c_password, client_login_callback, (void*)(intptr_t)callback_ptr);
+    if (handle == NULL) {
+        LOGE("Failed to queue login request");
+    } else {
+        LOGI("Login requested for user: %s", c_username);
+    }
+
+    (*env)->ReleaseStringUTFChars(env, username, c_username);
+    (*env)->ReleaseStringUTFChars(env, password, c_password);
+    return (handle != NULL) ? JNI_TRUE : JNI_FALSE;
+}
+
 // Begin identify and load game
 JNIEXPORT jboolean JNICALL
 Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeBeginIdentifyAndLoadGame(

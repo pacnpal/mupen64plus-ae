@@ -33,7 +33,8 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
     private volatile boolean mHardcoreEnabled = false;
     private volatile boolean mSessionActive = false;
     private String mUsername;
-    private String mToken;
+    private String mPassword;
+    private boolean mUseTokenLogin = false;
     private long mSessionRequestCounter = 0;
     private long mActiveSessionRequestId = 0;
     private boolean mLoginCompleted = false;
@@ -247,7 +248,12 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
             long requestId = ++mSessionRequestCounter;
             resetSessionRequestStateLocked(requestId);
 
-            boolean loginQueued = mNative.nativeBeginLoginWithToken(mClientPtr, mUsername, mToken, requestId);
+            boolean loginQueued;
+            if (mUseTokenLogin) {
+                loginQueued = mNative.nativeBeginLoginWithToken(mClientPtr, mUsername, mPassword, requestId);
+            } else {
+                loginQueued = mNative.nativeBeginLoginWithPassword(mClientPtr, mUsername, mPassword, requestId);
+            }
             boolean loadQueued = mNative.nativeBeginIdentifyAndLoadGame(
                     mClientPtr, mNative.nativeGetN64ConsoleId(), gameHash, requestId);
 
@@ -290,14 +296,30 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
     /**
      * Set user credentials
      */
-    public synchronized void setCredentials(String username, String token) {
+    public synchronized void setCredentials(String username, String password) {
         mUsername = username;
-        mToken = token;
+        mPassword = password;
+        mUseTokenLogin = false;
+        clearSessionRequestStateLocked();
+        if (username == null || password == null) {
+            Log.i(TAG, "Credentials cleared");
+        } else {
+            Log.i(TAG, "Password credentials set for user: " + username);
+        }
+    }
+
+    /**
+     * Set user credentials using an API token.
+     */
+    public synchronized void setTokenCredentials(String username, String token) {
+        mUsername = username;
+        mPassword = token;
+        mUseTokenLogin = username != null && token != null;
         clearSessionRequestStateLocked();
         if (username == null || token == null) {
             Log.i(TAG, "Credentials cleared");
         } else {
-            Log.i(TAG, "Credentials set for user: " + username);
+            Log.i(TAG, "Token credentials set for user: " + username);
         }
     }
     
@@ -312,7 +334,7 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
      * Check if user is logged in
      */
     public boolean isLoggedIn() {
-        return mUsername != null && mToken != null;
+        return mUsername != null && mPassword != null;
     }
     
     /**

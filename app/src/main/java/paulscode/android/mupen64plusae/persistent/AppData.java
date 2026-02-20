@@ -343,6 +343,7 @@ public class AppData
     
     // RetroAchievements keys
     private static final String KEY_RA_USERNAME = "retroachievementsUsername";
+    private static final String KEY_RA_PASSWORD = "retroachievementsPassword";
     private static final String KEY_RA_TOKEN = "retroachievementsToken";
     private static final String KEY_RA_ENABLED = "retroachievementsEnabled";
     private static final String KEY_RA_HARDCORE = "retroachievementsHardcore";
@@ -760,19 +761,41 @@ public class AppData
     }
     
     /**
+     * Get RetroAchievements password
+     * @return Password or null if not set
+     */
+    public String getRetroAchievementsPassword() {
+        return mPreferences.getString(KEY_RA_PASSWORD, null);
+    }
+
+    /**
      * Get RetroAchievements token
      * @return Token or null if not set
      */
     public String getRetroAchievementsToken() {
         return mPreferences.getString(KEY_RA_TOKEN, null);
     }
-    
+
     /**
      * Set RetroAchievements token
      * @param token Token to store
      */
     public void setRetroAchievementsToken(String token) {
-        mPreferences.edit().putString(KEY_RA_TOKEN, token).apply();
+        mPreferences.edit()
+                .putString(KEY_RA_TOKEN, token)
+                .remove(KEY_RA_PASSWORD)
+                .apply();
+    }
+
+    /**
+     * Set RetroAchievements password
+     * @param password Password to store
+     */
+    public void setRetroAchievementsPassword(String password) {
+        mPreferences.edit()
+                .putString(KEY_RA_PASSWORD, password)
+                .remove(KEY_RA_TOKEN)
+                .apply();
     }
     
     /**
@@ -813,6 +836,7 @@ public class AppData
     public void clearRetroAchievementsCredentials() {
         mPreferences.edit()
             .remove(KEY_RA_USERNAME)
+            .remove(KEY_RA_PASSWORD)
             .remove(KEY_RA_TOKEN)
             .apply();
     }

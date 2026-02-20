@@ -981,9 +981,12 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
                 
                 // Load credentials
                 String username = mAppData.getRetroAchievementsUsername();
+                String password = mAppData.getRetroAchievementsPassword();
                 String token = mAppData.getRetroAchievementsToken();
-                if (username != null && token != null) {
-                    mRetroAchievementsManager.setCredentials(username, token);
+                if (username != null && password != null) {
+                    mRetroAchievementsManager.setCredentials(username, password);
+                } else if (username != null && token != null) {
+                    mRetroAchievementsManager.setTokenCredentials(username, token);
                 }
                 
                 Log.i(TAG, "RetroAchievements initialized");
