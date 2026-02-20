@@ -72,6 +72,91 @@ public class RCheevosNative {
          * @param errorMessage Error detail when game load fails (nullable)
          */
         void onGameLoadResult(long requestId, boolean success, String errorMessage);
+
+        /**
+         * Called when an achievement is triggered (unlocked).
+         */
+        void onAchievementTriggered(int id, String title, String description, String badgeUrl, int points);
+
+        /**
+         * Called when achievement progress should be shown or updated.
+         */
+        void onAchievementProgressUpdated(int id, String title, String measuredProgress, float measuredPercent);
+
+        /**
+         * Called when achievement progress indicator should be hidden.
+         */
+        void onAchievementProgressHidden();
+
+        /**
+         * Called when all achievements for the game have been earned.
+         */
+        void onGameCompleted();
+
+        /**
+         * Called when all achievements for a subset have been earned.
+         */
+        void onSubsetCompleted(String subsetTitle);
+
+        /**
+         * Called when hardcore mode triggers a reset.
+         */
+        void onHardcoreReset();
+
+        /**
+         * Called when a game session starts successfully with game info.
+         */
+        void onGameSessionStarted(String gameTitle, String badgeUrl);
+
+        /**
+         * Called when a challenge achievement indicator should be shown.
+         */
+        void onAchievementChallengeIndicatorShow(int id, String title, String badgeUrl);
+
+        /**
+         * Called when a challenge achievement indicator should be hidden.
+         */
+        void onAchievementChallengeIndicatorHide(int id);
+
+        /**
+         * Called when a leaderboard attempt has started.
+         */
+        void onLeaderboardStarted(String title, String description);
+
+        /**
+         * Called when a leaderboard attempt has failed.
+         */
+        void onLeaderboardFailed(String title);
+
+        /**
+         * Called when a leaderboard score has been submitted.
+         */
+        void onLeaderboardSubmitted(String title, String score, String bestScore, int newRank, int numEntries);
+
+        /**
+         * Called when a leaderboard tracker should be shown.
+         */
+        void onLeaderboardTrackerShow(int trackerId, String display);
+
+        /**
+         * Called when a leaderboard tracker should be hidden.
+         */
+        void onLeaderboardTrackerHide(int trackerId);
+
+        /**
+         * Called when a leaderboard tracker display value has changed.
+         */
+        void onLeaderboardTrackerUpdate(int trackerId, String display);
+
+        /**
+         * Called when a server error occurs.
+         */
+        void onServerError(String api, String errorMessage);
+
+        /**
+         * Called when connection state changes (disconnected or reconnected).
+         */
+        void onConnectionChanged(boolean connected);
     }
     
     /**
@@ -156,4 +241,66 @@ public class RCheevosNative {
      * @param callbackPtr Callback pointer (will be called on completion)
      */
     public native boolean nativeBeginIdentifyAndLoadGame(long clientPtr, int consoleId, String gameHash, long callbackPtr);
+
+    /**
+     * Serialize achievement progress state for save states
+     * @param clientPtr Client pointer
+     * @return Byte array of serialized progress, or null on failure
+     */
+    public native byte[] nativeSerializeProgress(long clientPtr);
+
+    /**
+     * Deserialize achievement progress state from a save state
+     * @param clientPtr Client pointer
+     * @param data Byte array of serialized progress
+     * @return true if deserialization succeeded
+     */
+    public native boolean nativeDeserializeProgress(long clientPtr, byte[] data);
+
+    /**
+     * Check if it is safe to pause without affecting achievement evaluation
+     * @param clientPtr Client pointer
+     * @return true if pausing is safe
+     */
+    public native boolean nativeCanPause(long clientPtr);
+
+    /**
+     * Get user game summary (achievement counts and points)
+     * @param clientPtr Client pointer
+     * @return int array [numCore, numUnlocked, pointsCore, pointsUnlocked], or null
+     */
+    public native int[] nativeGetUserGameSummary(long clientPtr);
+
+    /**
+     * Get current rich presence message
+     * @param clientPtr Client pointer
+     * @return Rich presence string, or null if unavailable
+     */
+    public native String nativeGetRichPresenceMessage(long clientPtr);
+
+    /**
+     * Reset achievement and leaderboard state. Call when the emulator is reset.
+     * @param clientPtr Client pointer
+     */
+    public native void nativeReset(long clientPtr);
+
+    /**
+     * Unload the current game from rcheevos. Call when the game session ends.
+     * @param clientPtr Client pointer
+     */
+    public native void nativeUnloadGame(long clientPtr);
+
+    /**
+     * Get the API token for the logged-in user.
+     * @param clientPtr Client pointer
+     * @return API token string, or null if not logged in
+     */
+    public native String nativeGetUserToken(long clientPtr);
+
+    /**
+     * Get the achievement list as a JSON string.
+     * @param clientPtr Client pointer
+     * @return JSON string with buckets and achievements, or null
+     */
+    public native String nativeGetAchievementListJson(long clientPtr);
 }

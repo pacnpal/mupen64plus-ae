@@ -94,6 +94,9 @@ import paulscode.android.mupen64plusae.util.DisplayWrapper;
 import paulscode.android.mupen64plusae.util.FileUtil;
 import paulscode.android.mupen64plusae.util.LocaleContextWrapper;
 import paulscode.android.mupen64plusae.util.Notifier;
+import paulscode.android.mupen64plusae.retroachievements.AchievementListDialogFragment;
+import paulscode.android.mupen64plusae.retroachievements.AchievementOverlayView;
+import paulscode.android.mupen64plusae.retroachievements.RetroAchievementsManager;
 import paulscode.android.mupen64plusae.util.RomDatabase;
 
 import static paulscode.android.mupen64plusae.persistent.GlobalPrefs.DEFAULT_LOCALE_OVERRIDE;
@@ -138,7 +141,8 @@ import static paulscode.android.mupen64plusae.persistent.GlobalPrefs.DEFAULT_LOC
 public class GameActivity extends AppCompatActivity implements PromptConfirmListener,
         GameSidebarActionHandler, CoreEventListener, View.OnTouchListener,
         NetplayClientSetupDialog.OnServerDialogActionListener,
-        NetplayServerSetupDialog.OnClientDialogActionListener, NetplayFragment.NetplayListener
+        NetplayServerSetupDialog.OnClientDialogActionListener, NetplayFragment.NetplayListener,
+        RetroAchievementsManager.AchievementEventListener
 {
     private static final String TAG = "GameActivity";
     // Activity and views
@@ -147,6 +151,7 @@ public class GameActivity extends AppCompatActivity implements PromptConfirmList
     private DrawerLayout mDrawerLayout;
     private GameSidebar mGameSidebar;
     private GameSurface mGameSurface;
+    private AchievementOverlayView mAchievementOverlay;
 
     // Input resources
     private VisibleTouchMap mTouchscreenMap;
@@ -343,6 +348,10 @@ public class GameActivity extends AppCompatActivity implements PromptConfirmList
         mFpsOverlay = findViewById(R.id.fpsOverlay);
         mDrawerLayout = findViewById(R.id.drawerLayout);
         mGameSidebar = findViewById(R.id.gameSidebar);
+        mAchievementOverlay = findViewById(R.id.achievementOverlay);
+
+        // Register for RetroAchievements events
+        RetroAchievementsManager.getInstance(this).setEventListener(this);
 
         // Don't darken the game screen when the drawer is open
         mDrawerLayout.setScrimColor(0x0);
@@ -658,6 +667,12 @@ public class GameActivity extends AppCompatActivity implements PromptConfirmList
         if (mOverlay != null) {
             mOverlay.onDestroy();
         }
+
+        // Unregister from RetroAchievements events
+        RetroAchievementsManager.getInstance(this).clearEventListener();
+        if (mAchievementOverlay != null) {
+            mAchievementOverlay.destroy();
+        }
     }
 
     @Override
@@ -701,6 +716,12 @@ public class GameActivity extends AppCompatActivity implements PromptConfirmList
         final MenuItem frameLimiterItem =
             mGameSidebar.getMenu().findItem(R.id.menuItem_disable_frame_limiter);
         frameLimiterItem.setTitle(this.getString(resId));
+
+        //Achievements menu visibility
+        final MenuItem achievementsItem = mGameSidebar.getMenu().findItem(R.id.menuItem_achievements);
+        if (achievementsItem != null) {
+            achievementsItem.setVisible(RetroAchievementsManager.getInstance(this).isSessionActive());
+        }
 
         //Reload player pak settings
         UpdateControllerMenu(R.id.menuItem_player_one, mGamePrefs.isPlugged[0], 1);
@@ -840,6 +861,13 @@ public class GameActivity extends AppCompatActivity implements PromptConfirmList
             setPakTypeFromPrompt(3);
         } else if (menuItem.getItemId() ==  R.id.menuItem_player_four) {
             setPakTypeFromPrompt(4);
+        } else if (menuItem.getItemId() == R.id.menuItem_achievements) {
+            if (mDrawerLayout.isDrawerOpen(GravityCompat.START)) {
+                mDrawerLayout.closeDrawer(GravityCompat.START);
+                mOverlay.requestFocus();
+            }
+            AchievementListDialogFragment.newInstance()
+                    .show(getSupportFragmentManager(), AchievementListDialogFragment.FRAGMENT_TAG);
         } else if (menuItem.getItemId() ==  R.id.menuItem_setIme) {
             final InputMethodManager imeManager = (InputMethodManager)
                 this.getSystemService(Context.INPUT_METHOD_SERVICE);
@@ -1428,6 +1456,128 @@ public class GameActivity extends AppCompatActivity implements PromptConfirmList
     {
         if (mIsNetplayServer && mNetplayServerDialog != null) {
             mNetplayServerDialog.onUpnpPortsObtained(tcpPort1, tcpPort2, udpPort2);
+        }
+    }
+
+    // ========== AchievementEventListener ==========
+
+    @Override
+    public void onAchievementTriggered(int id, String title, String description, String badgeUrl, int points) {
+        if (mAchievementOverlay != null) {
+            mAchievementOverlay.showAchievementTriggered(id, title, description, badgeUrl, points);
+        }
+    }
+
+    @Override
+    public void onAchievementProgressUpdated(int id, String title, String measuredProgress, float measuredPercent) {
+        if (mAchievementOverlay != null) {
+            mAchievementOverlay.showAchievementProgress(id, title, measuredProgress, measuredPercent);
+        }
+    }
+
+    @Override
+    public void onAchievementProgressHidden() {
+        if (mAchievementOverlay != null) {
+            mAchievementOverlay.hideAchievementProgress();
+        }
+    }
+
+    @Override
+    public void onAchievementChallengeIndicatorShow(int id, String title, String badgeUrl) {
+        if (mAchievementOverlay != null) {
+            mAchievementOverlay.showChallengeIndicator(id, title, badgeUrl);
+        }
+    }
+
+    @Override
+    public void onAchievementChallengeIndicatorHide(int id) {
+        if (mAchievementOverlay != null) {
+            mAchievementOverlay.hideChallengeIndicator(id);
+        }
+    }
+
+    @Override
+    public void onGameCompleted(String gameTitle) {
+        if (mAchievementOverlay != null) {
+            mAchievementOverlay.showGameCompleted(gameTitle);
+        }
+    }
+
+    @Override
+    public void onSubsetCompleted(String subsetTitle) {
+        if (mAchievementOverlay != null) {
+            mAchievementOverlay.showSubsetCompleted(subsetTitle);
+        }
+    }
+
+    @Override
+    public void onGameSessionStarted(String gameTitle, String badgeUrl, int numAchievements, int numUnlocked) {
+        if (mAchievementOverlay != null) {
+            mAchievementOverlay.showGameSessionStarted(gameTitle, badgeUrl, numAchievements, numUnlocked);
+        }
+    }
+
+    @Override
+    public void onHardcoreReset() {
+        Log.i(TAG, "Hardcore reset: restarting emulator");
+        if (mCoreFragment != null) {
+            mCoreFragment.restartEmulator();
+        }
+    }
+
+    @Override
+    public void onLeaderboardStarted(String title, String description) {
+        if (mAchievementOverlay != null) {
+            mAchievementOverlay.showLeaderboardStarted(title, description);
+        }
+    }
+
+    @Override
+    public void onLeaderboardFailed(String title) {
+        if (mAchievementOverlay != null) {
+            mAchievementOverlay.showLeaderboardFailed(title);
+        }
+    }
+
+    @Override
+    public void onLeaderboardSubmitted(String title, String score, String bestScore, int newRank, int numEntries) {
+        if (mAchievementOverlay != null) {
+            mAchievementOverlay.showLeaderboardSubmitted(title, score, bestScore, newRank, numEntries);
+        }
+    }
+
+    @Override
+    public void onLeaderboardTrackerShow(int trackerId, String display) {
+        if (mAchievementOverlay != null) {
+            mAchievementOverlay.showLeaderboardTracker(trackerId, display);
+        }
+    }
+
+    @Override
+    public void onLeaderboardTrackerHide(int trackerId) {
+        if (mAchievementOverlay != null) {
+            mAchievementOverlay.hideLeaderboardTracker(trackerId);
+        }
+    }
+
+    @Override
+    public void onLeaderboardTrackerUpdate(int trackerId, String display) {
+        if (mAchievementOverlay != null) {
+            mAchievementOverlay.updateLeaderboardTracker(trackerId, display);
+        }
+    }
+
+    @Override
+    public void onServerError(String api, String errorMessage) {
+        Notifier.showToast(getApplicationContext(), getString(R.string.ra_overlay_server_error, errorMessage));
+    }
+
+    @Override
+    public void onConnectionChanged(boolean connected) {
+        if (connected) {
+            Notifier.showToast(getApplicationContext(), getString(R.string.ra_overlay_connection_restored));
+        } else {
+            Notifier.showToast(getApplicationContext(), getString(R.string.ra_overlay_connection_lost));
         }
     }
 }

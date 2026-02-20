@@ -44,6 +44,7 @@ import android.text.TextUtils;
 import android.util.Log;
 import android.util.SparseArray;
 import android.view.Surface;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.core.app.NotificationCompat;
@@ -54,6 +55,8 @@ import paulscode.android.mupen64plusae.R;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetAddress;
@@ -179,8 +182,6 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
 
     private GameDataManager mGameDataManager = null;
     private RetroAchievementsManager mRetroAchievementsManager = null;
-    private long mLastRAFrameTime = 0;
-    private static final long RA_FRAME_INTERVAL_MS = 500;  // Call doFrame every 500ms
 
     private static final CoreInterface mCoreInterface = new CoreInterface();
 
@@ -327,18 +328,24 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
 
         mCoreInterface.addOnStateCallbackListener(saveComplete);
 
+        saveRaProgress(latestSave);
         mCoreInterface.emuSaveFile( latestSave );
     }
 
     void saveState(String filename)
     {
         File currentSaveStateFile = new File( mGamePrefs.getUserSaveDir() + "/" + filename );
+        saveRaProgress(currentSaveStateFile.getAbsolutePath());
         mCoreInterface.emuSaveFile( currentSaveStateFile.getAbsolutePath() );
     }
 
     void pauseEmulator()
     {
         if (!mUsingNetplay) {
+            if (mRetroAchievementsManager != null && !mRetroAchievementsManager.canPause()) {
+                Log.w(TAG, "RetroAchievements: Pause blocked - achievement evaluation in progress");
+                return;
+            }
             mIsPaused = true;
             mCoreInterface.emuPause();
 
@@ -354,6 +361,10 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
                 mIsPaused = false;
                 mCoreInterface.emuResume();
             } else if (state == CoreTypes.m64p_emu_state.M64EMU_RUNNING) {
+                if (mRetroAchievementsManager != null && !mRetroAchievementsManager.canPause()) {
+                    Log.w(TAG, "RetroAchievements: Pause blocked - achievement evaluation in progress");
+                    return;
+                }
                 mIsPaused = true;
                 mCoreInterface.emuPause();
             }
@@ -370,6 +381,11 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
     void toggleFramelimiter()
     {
         if (!mUsingNetplay) {
+            if (isRetroAchievementsHardcoreActive()) {
+                Toast.makeText(getApplicationContext(),
+                        getString(R.string.ra_hardcore_speed_blocked), Toast.LENGTH_SHORT).show();
+                return;
+            }
             boolean state = mCoreInterface.emuGetFramelimiter();
             mCoreInterface.emuSetFramelimiter( !state );
         }
@@ -401,9 +417,47 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
         return mRetroAchievementsManager != null && mRetroAchievementsManager.isHardcoreSessionActive();
     }
 
+    private void saveRaProgress(String savePath) {
+        if (mRetroAchievementsManager == null) return;
+        byte[] raData = mRetroAchievementsManager.serializeProgress();
+        if (raData != null) {
+            try {
+                FileOutputStream fos = new FileOutputStream(savePath + ".ra");
+                fos.write(raData);
+                fos.close();
+                Log.i(TAG, "RetroAchievements: Saved progress to " + savePath + ".ra");
+            } catch (IOException e) {
+                Log.e(TAG, "RetroAchievements: Failed to save progress", e);
+            }
+        }
+    }
+
+    private void loadRaProgress(String savePath) {
+        if (mRetroAchievementsManager == null) return;
+        File raFile = new File(savePath + ".ra");
+        if (raFile.exists()) {
+            try {
+                FileInputStream fis = new FileInputStream(raFile);
+                byte[] raData = new byte[(int) raFile.length()];
+                fis.read(raData);
+                fis.close();
+                if (mRetroAchievementsManager.deserializeProgress(raData)) {
+                    Log.i(TAG, "RetroAchievements: Restored progress from " + savePath + ".ra");
+                }
+            } catch (IOException e) {
+                Log.e(TAG, "RetroAchievements: Failed to load progress", e);
+            }
+        }
+    }
+
+    private String getSlotRaPath() {
+        return mGamePrefs.getUserSaveDir() + "/ra_slot_" + getSlot();
+    }
+
     void saveSlot()
     {
         // Hardcore mode: saving is allowed (for practice), but loading is not
+        saveRaProgress(getSlotRaPath());
         mCoreInterface.emuSaveSlot();
     }
 
@@ -412,12 +466,12 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
         // Hardcore mode: prevent loading save states
         if (isRetroAchievementsHardcoreActive()) {
             Log.w(TAG, "RetroAchievements: Save state loading disabled in Hardcore mode");
-            if (mListener != null) {
-                // Could show a toast here
-            }
+            Toast.makeText(getApplicationContext(),
+                    getString(R.string.ra_hardcore_savestate_blocked), Toast.LENGTH_SHORT).show();
             return;
         }
         mCoreInterface.emuLoadSlot();
+        loadRaProgress(getSlotRaPath());
     }
 
     void loadState(File file)
@@ -425,9 +479,12 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
         // Hardcore mode: prevent loading save states
         if (isRetroAchievementsHardcoreActive()) {
             Log.w(TAG, "RetroAchievements: Save state loading disabled in Hardcore mode");
+            Toast.makeText(getApplicationContext(),
+                    getString(R.string.ra_hardcore_savestate_blocked), Toast.LENGTH_SHORT).show();
             return;
         }
         mCoreInterface.emuLoadFile( file.getAbsolutePath() );
+        loadRaProgress(file.getAbsolutePath());
     }
 
     void screenshot()
@@ -437,6 +494,11 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
 
     void setCustomSpeed(int value)
     {
+        if (isRetroAchievementsHardcoreActive()) {
+            Toast.makeText(getApplicationContext(),
+                    getString(R.string.ra_hardcore_speed_blocked), Toast.LENGTH_SHORT).show();
+            return;
+        }
         mCoreInterface.emuSetSpeed( value );
     }
 
@@ -450,6 +512,11 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
 
     void advanceFrame()
     {
+        if (isRetroAchievementsHardcoreActive()) {
+            Toast.makeText(getApplicationContext(),
+                    getString(R.string.ra_hardcore_frame_advance_blocked), Toast.LENGTH_SHORT).show();
+            return;
+        }
         mCoreInterface.emuAdvanceFrame();
     }
 
@@ -475,6 +542,9 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
     void restart()
     {
         mCoreInterface.emuReset();
+        if (mRetroAchievementsManager != null) {
+            mRetroAchievementsManager.reset();
+        }
     }
 
     void connectForNetplay(int regId, int player, String videoPlugin, String rspPlugin, InetAddress address, int port) {
@@ -781,6 +851,7 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
                     {
                         final String latestSave = mGameDataManager.getLatestAutoSave();
                         mCoreInterface.emuLoadFile(latestSave);
+                        loadRaProgress(latestSave);
                     } else if (!mIsRestarting && hardcoreSessionActive) {
                         Log.i(TAG, "RetroAchievements: Skipping autosave load in Hardcore mode");
                     }
@@ -1313,16 +1384,12 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
 
     @Override
     public void onFrameRendered() {
-        // Throttle RetroAchievements processing to every 500ms to avoid overhead on render thread
+        // Call doFrame every emulation frame so rcheevos can detect transient memory conditions
         if (mRetroAchievementsManager != null && mIsRunning && !mIsPaused) {
-            long currentTime = System.currentTimeMillis();
-            if (currentTime - mLastRAFrameTime >= RA_FRAME_INTERVAL_MS) {
-                mLastRAFrameTime = currentTime;
-                try {
-                    mRetroAchievementsManager.doFrame();
-                } catch (Exception e) {
-                    Log.e(TAG, "RetroAchievements: Error in doFrame", e);
-                }
+            try {
+                mRetroAchievementsManager.doFrame();
+            } catch (Exception e) {
+                Log.e(TAG, "RetroAchievements: Error in doFrame", e);
             }
         }
     }

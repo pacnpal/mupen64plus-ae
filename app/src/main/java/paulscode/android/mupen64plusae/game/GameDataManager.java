@@ -121,6 +121,10 @@ public class GameDataManager
                 completeFile = completeFile + "." + CoreService.COMPLETE_EXTENSION;
                 deleteResult = deleteResult && new File(completeFile).delete();
 
+                //Also remove the corresponding ".ra" RetroAchievements progress file
+                String raFile = theResult.getAbsolutePath() + ".ra";
+                new File(raFile).delete();
+
                 if (!deleteResult) {
                     Log.w("GameDataManager", "Unable to delete autosave file: " + result.get(0).getName());
                 }

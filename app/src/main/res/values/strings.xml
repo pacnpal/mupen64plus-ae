@@ -1045,5 +1045,34 @@
     <string name="retroachievements_leaderboard_submission">Leaderboard: %1$s - %2$s</string>
     <string name="retroachievements_hardcore_active">Hardcore Mode Active - Save states disabled</string>
 
+    <!-- RetroAchievements overlay strings -->
+    <string name="ra_overlay_now_playing">Now Playing</string>
+    <string name="ra_overlay_achievement_count">%1$d/%2$d achievements</string>
+    <string name="ra_overlay_game_mastered">Game Mastered!</string>
+    <string name="ra_overlay_leaderboard_prefix">Leaderboard: %1$s</string>
+    <string name="ra_overlay_leaderboard_failed">Leaderboard Failed</string>
+    <string name="ra_overlay_leaderboard_rank">%1$s (Rank #%2$d/%3$d)</string>
+    <string name="ra_overlay_subset_mastered">Subset Mastered!</string>
+    <string name="ra_overlay_server_error">RetroAchievements error: %1$s</string>
+    <string name="ra_overlay_connection_restored">RetroAchievements: Connection restored</string>
+    <string name="ra_overlay_connection_lost">RetroAchievements: Connection lost, unlocks will be retried</string>
+    <string name="ra_login_failed">RetroAchievements login failed: %1$s</string>
+    <string name="ra_game_load_failed">RetroAchievements: %1$s</string>
+    <string name="ra_hardcore_savestate_blocked">Save states cannot be loaded in Hardcore mode</string>
+    <string name="ra_hardcore_speed_blocked">Speed changes disabled in Hardcore mode</string>
+    <string name="ra_hardcore_frame_advance_blocked">Frame advance disabled in Hardcore mode</string>
+
+    <!-- RetroAchievements Achievement List -->
+    <string name="ra_list_menu_item">Achievements</string>
+    <string name="ra_list_title">Achievements</string>
+    <string name="ra_list_summary">%1$d/%2$d achievements · %3$d/%4$d points</string>
+    <string name="ra_list_no_achievements">No achievements for this game.</string>
+    <string name="ra_list_error">Failed to load achievement list.</string>
+    <string name="ra_list_close">Close</string>
+    <string name="ra_list_badge_desc">Achievement badge</string>
+    <string name="ra_list_rarity">%.1f%% of players</string>
+    <string name="ra_list_type_missable">Missable</string>
+    <string name="ra_list_type_progression">Progression</string>
+    <string name="ra_list_type_win">Win Condition</string>
 
 </resources>

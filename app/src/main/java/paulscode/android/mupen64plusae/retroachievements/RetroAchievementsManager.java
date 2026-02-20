@@ -8,7 +8,13 @@
 package paulscode.android.mupen64plusae.retroachievements;
 
 import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
+import android.widget.Toast;
+
+import paulscode.android.mupen64plusae.R;
+import paulscode.android.mupen64plusae.persistent.AppData;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -55,7 +61,48 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
     public interface MemoryReadCallback {
         int readMemory(int address, byte[] buffer, int numBytes);
     }
-    
+
+    /**
+     * Listener interface for achievement events, implemented by GameActivity.
+     */
+    public interface AchievementEventListener {
+        void onAchievementTriggered(int id, String title, String description, String badgeUrl, int points);
+        void onAchievementProgressUpdated(int id, String title, String measuredProgress, float measuredPercent);
+        void onAchievementProgressHidden();
+        void onAchievementChallengeIndicatorShow(int id, String title, String badgeUrl);
+        void onAchievementChallengeIndicatorHide(int id);
+        void onGameCompleted(String gameTitle);
+        void onSubsetCompleted(String subsetTitle);
+        void onGameSessionStarted(String gameTitle, String badgeUrl, int numAchievements, int numUnlocked);
+        void onHardcoreReset();
+        void onLeaderboardStarted(String title, String description);
+        void onLeaderboardFailed(String title);
+        void onLeaderboardSubmitted(String title, String score, String bestScore, int newRank, int numEntries);
+        void onLeaderboardTrackerShow(int trackerId, String display);
+        void onLeaderboardTrackerHide(int trackerId);
+        void onLeaderboardTrackerUpdate(int trackerId, String display);
+        void onServerError(String api, String errorMessage);
+        void onConnectionChanged(boolean connected);
+    }
+
+    private volatile AchievementEventListener mEventListener;
+    private final Handler mMainHandler = new Handler(Looper.getMainLooper());
+    private String mCurrentGameTitle;
+
+    /**
+     * Set the achievement event listener (typically GameActivity).
+     */
+    public void setEventListener(AchievementEventListener listener) {
+        mEventListener = listener;
+    }
+
+    /**
+     * Clear the achievement event listener.
+     */
+    public void clearEventListener() {
+        mEventListener = null;
+    }
+
     /**
      * Get singleton instance
      */
@@ -127,6 +174,11 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
         }
         
         if (mClientPtr != 0) {
+            // Unload the game before destroying the client
+            if (mSessionActive) {
+                mNative.nativeUnloadGame(mClientPtr);
+                mSessionActive = false;
+            }
             mNative.nativeDestroyClient(mClientPtr);
             mClientPtr = 0;
         }
@@ -283,9 +335,9 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
     }
     
     /**
-     * Process achievements - called periodically during emulation
-     * Invoked from CoreService.onFrameRendered() with 500ms throttling
-     * to avoid performance overhead on the render thread
+     * Process achievements - called every emulation frame.
+     * Invoked from CoreService.onFrameRendered() so rcheevos can
+     * detect transient memory conditions for achievement evaluation.
      */
     public void doFrame() {
         if (mInitialized && mClientPtr != 0 && mSessionActive) {
@@ -337,13 +389,39 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
         return mUsername != null && mPassword != null;
     }
     
+    // ========== Session Lifecycle ==========
+
     /**
-     * Get notifications helper
+     * Reset achievement and leaderboard tracking state. Call when the emulator resets.
      */
-    public RetroAchievementsNotifications getNotifications() {
-        return mNotifications;
+    public void reset() {
+        if (mInitialized && mClientPtr != 0 && mSessionActive) {
+            mNative.nativeReset(mClientPtr);
+            Log.i(TAG, "Achievement state reset");
+        }
     }
-    
+
+    /**
+     * Unload the current game from rcheevos. Call when the game session ends.
+     */
+    public void unloadGame() {
+        if (mInitialized && mClientPtr != 0) {
+            mSessionActive = false;
+            mNative.nativeUnloadGame(mClientPtr);
+            mCurrentGameTitle = null;
+            Log.i(TAG, "Game unloaded from rcheevos");
+        }
+    }
+
+    /**
+     * Get the API token for the logged-in user. Available after successful login.
+     * @return API token string, or null
+     */
+    public String getUserToken() {
+        if (!mInitialized || mClientPtr == 0) return null;
+        return mNative.nativeGetUserToken(mClientPtr);
+    }
+
     // ========== RCheevosCallback Implementation ==========
     
     @Override
@@ -451,8 +529,25 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
 
         if (success) {
             Log.i(TAG, "RetroAchievements login succeeded (request " + requestId + ")");
+            // Persist API token so future sessions can use token login
+            if (!mUseTokenLogin) {
+                String token = getUserToken();
+                if (token != null && !token.isEmpty()) {
+                    try {
+                        AppData appData = new AppData(mContext);
+                        appData.setRetroAchievementsToken(token);
+                        Log.i(TAG, "API token saved for future sessions");
+                    } catch (Exception e) {
+                        Log.w(TAG, "Failed to save API token", e);
+                    }
+                }
+            }
         } else {
             Log.w(TAG, "RetroAchievements login failed (request " + requestId + "): " + errorMessage);
+            final String msg = errorMessage;
+            mMainHandler.post(() -> Toast.makeText(mContext,
+                    mContext.getString(R.string.ra_login_failed, msg != null ? msg : "unknown error"),
+                    Toast.LENGTH_LONG).show());
         }
     }
 
@@ -470,6 +565,10 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
             Log.i(TAG, "RetroAchievements game load succeeded (request " + requestId + ")");
         } else {
             Log.w(TAG, "RetroAchievements game load failed (request " + requestId + "): " + errorMessage);
+            final String msg = errorMessage;
+            mMainHandler.post(() -> Toast.makeText(mContext,
+                    mContext.getString(R.string.ra_game_load_failed, msg != null ? msg : "unknown error"),
+                    Toast.LENGTH_LONG).show());
         }
     }
 
@@ -498,5 +597,235 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
     private void updateSessionActiveLocked() {
         // A session is active only after both async operations have completed successfully.
         mSessionActive = mLoginCompleted && mLoadCompleted && mLoginSucceeded && mLoadSucceeded;
+    }
+
+    // ========== Save State Serialization ==========
+
+    /**
+     * Serialize achievement progress for embedding in save states.
+     * @return Byte array of serialized progress, or null on failure
+     */
+    public byte[] serializeProgress() {
+        if (!mInitialized || mClientPtr == 0 || !mSessionActive) return null;
+        return mNative.nativeSerializeProgress(mClientPtr);
+    }
+
+    /**
+     * Deserialize achievement progress after loading a save state.
+     * @param data Byte array previously returned by serializeProgress()
+     * @return true if deserialization succeeded
+     */
+    public boolean deserializeProgress(byte[] data) {
+        if (!mInitialized || mClientPtr == 0 || !mSessionActive || data == null) return false;
+        return mNative.nativeDeserializeProgress(mClientPtr, data);
+    }
+
+    /**
+     * Check if it is safe to pause the emulator without affecting achievement evaluation.
+     * @return true if pausing is safe (or if RA is not active)
+     */
+    public boolean canPause() {
+        if (!mInitialized || mClientPtr == 0 || !mSessionActive) return true;
+        return mNative.nativeCanPause(mClientPtr);
+    }
+
+    /**
+     * Get user game summary with achievement counts and points.
+     * @return int array [numCore, numUnlocked, pointsCore, pointsUnlocked], or null
+     */
+    public int[] getUserGameSummary() {
+        if (!mInitialized || mClientPtr == 0 || !mSessionActive) return null;
+        return mNative.nativeGetUserGameSummary(mClientPtr);
+    }
+
+    /**
+     * Get current rich presence message describing what the player is doing.
+     * @return Rich presence string, or null if unavailable
+     */
+    public String getRichPresenceMessage() {
+        if (!mInitialized || mClientPtr == 0 || !mSessionActive) return null;
+        return mNative.nativeGetRichPresenceMessage(mClientPtr);
+    }
+
+    /**
+     * Get the achievement list as a JSON string for display in the achievement list screen.
+     * @return JSON string with buckets and achievements, or null
+     */
+    public String getAchievementListJson() {
+        if (!mInitialized || mClientPtr == 0 || !mSessionActive) return null;
+        return mNative.nativeGetAchievementListJson(mClientPtr);
+    }
+
+    /**
+     * Check if a RetroAchievements session is currently active.
+     */
+    public boolean isSessionActive() {
+        return mInitialized && mSessionActive;
+    }
+
+    // ========== Achievement Event Callbacks ==========
+
+    @Override
+    public void onAchievementTriggered(int id, String title, String description, String badgeUrl, int points) {
+        Log.i(TAG, "Achievement triggered: " + title + " (" + points + " pts)");
+        final AchievementEventListener listener = mEventListener;
+        if (listener != null) {
+            mMainHandler.post(() -> listener.onAchievementTriggered(id, title, description, badgeUrl, points));
+        }
+    }
+
+    @Override
+    public void onAchievementProgressUpdated(int id, String title, String measuredProgress, float measuredPercent) {
+        Log.d(TAG, "Achievement progress: " + title + " - " + measuredProgress);
+        final AchievementEventListener listener = mEventListener;
+        if (listener != null) {
+            mMainHandler.post(() -> listener.onAchievementProgressUpdated(id, title, measuredProgress, measuredPercent));
+        }
+    }
+
+    @Override
+    public void onAchievementProgressHidden() {
+        Log.d(TAG, "Achievement progress hidden");
+        final AchievementEventListener listener = mEventListener;
+        if (listener != null) {
+            mMainHandler.post(listener::onAchievementProgressHidden);
+        }
+    }
+
+    @Override
+    public void onGameCompleted() {
+        Log.i(TAG, "Game completed!");
+        final AchievementEventListener listener = mEventListener;
+        if (listener != null) {
+            final String title = mCurrentGameTitle;
+            mMainHandler.post(() -> listener.onGameCompleted(title != null ? title : ""));
+        }
+    }
+
+    @Override
+    public void onSubsetCompleted(String subsetTitle) {
+        Log.i(TAG, "Subset completed: " + subsetTitle);
+        final AchievementEventListener listener = mEventListener;
+        if (listener != null) {
+            mMainHandler.post(() -> listener.onSubsetCompleted(subsetTitle));
+        }
+    }
+
+    @Override
+    public void onHardcoreReset() {
+        Log.i(TAG, "Hardcore reset requested");
+        final AchievementEventListener listener = mEventListener;
+        if (listener != null) {
+            mMainHandler.post(listener::onHardcoreReset);
+        }
+    }
+
+    @Override
+    public void onGameSessionStarted(String gameTitle, String badgeUrl) {
+        Log.i(TAG, "Game session started: " + gameTitle);
+        mCurrentGameTitle = gameTitle;
+        int numAchievements = 0;
+        int numUnlocked = 0;
+        int[] summary = getUserGameSummary();
+        if (summary != null) {
+            numAchievements = summary[0];
+            numUnlocked = summary[1];
+        }
+        final int totalAchievements = numAchievements;
+        final int unlockedAchievements = numUnlocked;
+        final AchievementEventListener listener = mEventListener;
+        if (listener != null) {
+            mMainHandler.post(() -> listener.onGameSessionStarted(gameTitle, badgeUrl, totalAchievements, unlockedAchievements));
+        }
+    }
+
+    @Override
+    public void onAchievementChallengeIndicatorShow(int id, String title, String badgeUrl) {
+        Log.i(TAG, "Challenge indicator show: " + title);
+        final AchievementEventListener listener = mEventListener;
+        if (listener != null) {
+            mMainHandler.post(() -> listener.onAchievementChallengeIndicatorShow(id, title, badgeUrl));
+        }
+    }
+
+    @Override
+    public void onAchievementChallengeIndicatorHide(int id) {
+        Log.d(TAG, "Challenge indicator hide: " + id);
+        final AchievementEventListener listener = mEventListener;
+        if (listener != null) {
+            mMainHandler.post(() -> listener.onAchievementChallengeIndicatorHide(id));
+        }
+    }
+
+    @Override
+    public void onLeaderboardStarted(String title, String description) {
+        Log.i(TAG, "Leaderboard started: " + title);
+        final AchievementEventListener listener = mEventListener;
+        if (listener != null) {
+            mMainHandler.post(() -> listener.onLeaderboardStarted(title, description));
+        }
+    }
+
+    @Override
+    public void onLeaderboardFailed(String title) {
+        Log.i(TAG, "Leaderboard failed: " + title);
+        final AchievementEventListener listener = mEventListener;
+        if (listener != null) {
+            mMainHandler.post(() -> listener.onLeaderboardFailed(title));
+        }
+    }
+
+    @Override
+    public void onLeaderboardSubmitted(String title, String score, String bestScore, int newRank, int numEntries) {
+        Log.i(TAG, "Leaderboard submitted: " + title + " - " + score);
+        final AchievementEventListener listener = mEventListener;
+        if (listener != null) {
+            mMainHandler.post(() -> listener.onLeaderboardSubmitted(title, score, bestScore, newRank, numEntries));
+        }
+    }
+
+    @Override
+    public void onLeaderboardTrackerShow(int trackerId, String display) {
+        Log.d(TAG, "Leaderboard tracker show: " + trackerId + " " + display);
+        final AchievementEventListener listener = mEventListener;
+        if (listener != null) {
+            mMainHandler.post(() -> listener.onLeaderboardTrackerShow(trackerId, display));
+        }
+    }
+
+    @Override
+    public void onLeaderboardTrackerHide(int trackerId) {
+        Log.d(TAG, "Leaderboard tracker hide: " + trackerId);
+        final AchievementEventListener listener = mEventListener;
+        if (listener != null) {
+            mMainHandler.post(() -> listener.onLeaderboardTrackerHide(trackerId));
+        }
+    }
+
+    @Override
+    public void onLeaderboardTrackerUpdate(int trackerId, String display) {
+        Log.d(TAG, "Leaderboard tracker update: " + trackerId + " " + display);
+        final AchievementEventListener listener = mEventListener;
+        if (listener != null) {
+            mMainHandler.post(() -> listener.onLeaderboardTrackerUpdate(trackerId, display));
+        }
+    }
+
+    @Override
+    public void onServerError(String api, String errorMessage) {
+        Log.e(TAG, "Server error [" + api + "]: " + errorMessage);
+        final AchievementEventListener listener = mEventListener;
+        if (listener != null) {
+            mMainHandler.post(() -> listener.onServerError(api, errorMessage));
+        }
+    }
+
+    @Override
+    public void onConnectionChanged(boolean connected) {
+        Log.i(TAG, "Connection " + (connected ? "restored" : "lost"));
+        final AchievementEventListener listener = mEventListener;
+        if (listener != null) {
+            mMainHandler.post(() -> listener.onConnectionChanged(connected));
+        }
     }
 }

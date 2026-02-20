@@ -67,6 +67,10 @@
         </menu>
     </item>
     <item
+        android:id="@+id/menuItem_achievements"
+        android:icon="@android:drawable/btn_star"
+        android:title="@string/ra_list_menu_item" />
+    <item
         android:id="@+id/menuItem_setIme"
         android:title="@string/menuItem_setIme"/>
     <item

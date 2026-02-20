@@ -38,6 +38,14 @@
                 android:focusableInTouchMode="true"
                 android:background="@drawable/overlay_color"/>
         </LinearLayout>
+        <paulscode.android.mupen64plusae.retroachievements.AchievementOverlayView
+            android:id="@+id/achievementOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal"
+            android:elevation="10dp"
+            android:focusable="false"
+            android:focusableInTouchMode="false" />
     </FrameLayout>
 
     <!-- navigation drawer -->

@@ -16,6 +16,20 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
+// Safe NewStringUTF that returns empty string on NULL/OOM instead of crashing
+static jstring safe_new_string_utf(JNIEnv* env, const char* str) {
+    jstring result = (*env)->NewStringUTF(env, str ? str : "");
+    if (result == NULL) {
+        // OOM - clear pending exception and try empty string
+        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+        result = (*env)->NewStringUTF(env, "");
+        if (result == NULL && (*env)->ExceptionCheck(env)) {
+            (*env)->ExceptionClear(env);
+        }
+    }
+    return result;
+}
+
 // Global rc_client instance
 static rc_client_t* g_client = NULL;
 static JavaVM* g_jvm = NULL;
@@ -59,7 +73,7 @@ static void notify_session_callback(const char* method_name, jlong request_id, i
         return;
     }
 
-    jstring jerror = (error_message != NULL) ? (*env)->NewStringUTF(env, error_message) : NULL;
+    jstring jerror = (error_message != NULL) ? safe_new_string_utf(env, error_message) : NULL;
     (*env)->CallVoidMethod(env, g_callback_handler, mid, request_id, success ? JNI_TRUE : JNI_FALSE, jerror);
 
     if (jerror != NULL) {
@@ -139,8 +153,8 @@ static void server_call_callback(const rc_api_request_t* request,
         return;
     }
     
-    jstring jurl = (*env)->NewStringUTF(env, request->url);
-    jstring jpost_data = request->post_data ? (*env)->NewStringUTF(env, request->post_data) : NULL;
+    jstring jurl = safe_new_string_utf(env, request->url);
+    jstring jpost_data = request->post_data ? safe_new_string_utf(env, request->post_data) : NULL;
     
     (*env)->CallVoidMethod(env, g_callback_handler, mid, jurl, jpost_data, 
                           (jlong)(intptr_t)callback, (jlong)(intptr_t)callback_data);
@@ -153,6 +167,242 @@ static void server_call_callback(const rc_api_request_t* request,
 // Log message callback
 static void log_message_callback(const char* message, const rc_client_t* client) {
     LOGI("%s", message);
+}
+
+// Helper to get a JNIEnv, attaching if needed. Sets *attached = 1 if newly attached.
+static JNIEnv* get_jni_env(int* attached) {
+    *attached = 0;
+    JNIEnv* env;
+    jint result = (*g_jvm)->GetEnv(g_jvm, (void**)&env, JNI_VERSION_1_6);
+    if (result == JNI_EDETACHED) {
+        if ((*g_jvm)->AttachCurrentThread(g_jvm, &env, NULL) != 0) return NULL;
+        *attached = 1;
+    } else if (result != JNI_OK) {
+        return NULL;
+    }
+    return env;
+}
+
+// Event handler callback - dispatches rcheevos events to Java
+static void event_handler_callback(const rc_client_event_t* event, rc_client_t* client) {
+    if (g_jvm == NULL || g_callback_handler == NULL) return;
+
+    int attached = 0;
+    JNIEnv* env = get_jni_env(&attached);
+    if (env == NULL) return;
+
+    jclass cls = (*env)->GetObjectClass(env, g_callback_handler);
+    if (cls == NULL) {
+        if (attached) (*g_jvm)->DetachCurrentThread(g_jvm);
+        return;
+    }
+
+    switch (event->type) {
+        case RC_CLIENT_EVENT_ACHIEVEMENT_TRIGGERED: {
+            const rc_client_achievement_t* ach = event->achievement;
+            if (ach == NULL) break;
+            jmethodID mid = (*env)->GetMethodID(env, cls, "onAchievementTriggered",
+                "(ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;I)V");
+            if (mid == NULL) break;
+            jstring jtitle = safe_new_string_utf(env, ach->title);
+            jstring jdesc = safe_new_string_utf(env, ach->description);
+            jstring jbadge = safe_new_string_utf(env, ach->badge_url);
+            (*env)->CallVoidMethod(env, g_callback_handler, mid,
+                (jint)ach->id, jtitle, jdesc, jbadge, (jint)ach->points);
+            (*env)->DeleteLocalRef(env, jtitle);
+            (*env)->DeleteLocalRef(env, jdesc);
+            (*env)->DeleteLocalRef(env, jbadge);
+            break;
+        }
+        case RC_CLIENT_EVENT_ACHIEVEMENT_PROGRESS_INDICATOR_SHOW:
+        case RC_CLIENT_EVENT_ACHIEVEMENT_PROGRESS_INDICATOR_UPDATE: {
+            const rc_client_achievement_t* ach = event->achievement;
+            if (ach == NULL) break;
+            jmethodID mid = (*env)->GetMethodID(env, cls, "onAchievementProgressUpdated",
+                "(ILjava/lang/String;Ljava/lang/String;F)V");
+            if (mid == NULL) break;
+            jstring jtitle = safe_new_string_utf(env, ach->title);
+            jstring jprogress = safe_new_string_utf(env, ach->measured_progress);
+            (*env)->CallVoidMethod(env, g_callback_handler, mid,
+                (jint)ach->id, jtitle, jprogress, (jfloat)ach->measured_percent);
+            (*env)->DeleteLocalRef(env, jtitle);
+            (*env)->DeleteLocalRef(env, jprogress);
+            break;
+        }
+        case RC_CLIENT_EVENT_ACHIEVEMENT_PROGRESS_INDICATOR_HIDE: {
+            jmethodID mid = (*env)->GetMethodID(env, cls, "onAchievementProgressHidden", "()V");
+            if (mid != NULL) {
+                (*env)->CallVoidMethod(env, g_callback_handler, mid);
+            }
+            break;
+        }
+        case RC_CLIENT_EVENT_GAME_COMPLETED: {
+            jmethodID mid = (*env)->GetMethodID(env, cls, "onGameCompleted", "()V");
+            if (mid != NULL) {
+                (*env)->CallVoidMethod(env, g_callback_handler, mid);
+            }
+            break;
+        }
+        case RC_CLIENT_EVENT_SUBSET_COMPLETED: {
+            const rc_client_subset_t* subset = event->subset;
+            if (subset == NULL) break;
+            jmethodID mid = (*env)->GetMethodID(env, cls, "onSubsetCompleted",
+                "(Ljava/lang/String;)V");
+            if (mid == NULL) break;
+            jstring jtitle = safe_new_string_utf(env, subset->title);
+            (*env)->CallVoidMethod(env, g_callback_handler, mid, jtitle);
+            (*env)->DeleteLocalRef(env, jtitle);
+            break;
+        }
+        case RC_CLIENT_EVENT_RESET: {
+            jmethodID mid = (*env)->GetMethodID(env, cls, "onHardcoreReset", "()V");
+            if (mid != NULL) {
+                (*env)->CallVoidMethod(env, g_callback_handler, mid);
+            }
+            break;
+        }
+        case RC_CLIENT_EVENT_ACHIEVEMENT_CHALLENGE_INDICATOR_SHOW: {
+            const rc_client_achievement_t* ach = event->achievement;
+            if (ach == NULL) break;
+            jmethodID mid = (*env)->GetMethodID(env, cls, "onAchievementChallengeIndicatorShow",
+                "(ILjava/lang/String;Ljava/lang/String;)V");
+            if (mid == NULL) break;
+            jstring jtitle = safe_new_string_utf(env, ach->title);
+            jstring jbadge = safe_new_string_utf(env, ach->badge_url);
+            (*env)->CallVoidMethod(env, g_callback_handler, mid, (jint)ach->id, jtitle, jbadge);
+            (*env)->DeleteLocalRef(env, jtitle);
+            (*env)->DeleteLocalRef(env, jbadge);
+            break;
+        }
+        case RC_CLIENT_EVENT_ACHIEVEMENT_CHALLENGE_INDICATOR_HIDE: {
+            const rc_client_achievement_t* ach = event->achievement;
+            if (ach == NULL) break;
+            jmethodID mid = (*env)->GetMethodID(env, cls, "onAchievementChallengeIndicatorHide", "(I)V");
+            if (mid != NULL) {
+                (*env)->CallVoidMethod(env, g_callback_handler, mid, (jint)ach->id);
+            }
+            break;
+        }
+        case RC_CLIENT_EVENT_LEADERBOARD_STARTED: {
+            const rc_client_leaderboard_t* lb = event->leaderboard;
+            if (lb == NULL) break;
+            jmethodID mid = (*env)->GetMethodID(env, cls, "onLeaderboardStarted",
+                "(Ljava/lang/String;Ljava/lang/String;)V");
+            if (mid == NULL) break;
+            jstring jtitle = safe_new_string_utf(env, lb->title);
+            jstring jdesc = safe_new_string_utf(env, lb->description);
+            (*env)->CallVoidMethod(env, g_callback_handler, mid, jtitle, jdesc);
+            (*env)->DeleteLocalRef(env, jtitle);
+            (*env)->DeleteLocalRef(env, jdesc);
+            break;
+        }
+        case RC_CLIENT_EVENT_LEADERBOARD_FAILED: {
+            const rc_client_leaderboard_t* lb = event->leaderboard;
+            if (lb == NULL) break;
+            jmethodID mid = (*env)->GetMethodID(env, cls, "onLeaderboardFailed", "(Ljava/lang/String;)V");
+            if (mid == NULL) break;
+            jstring jtitle = safe_new_string_utf(env, lb->title);
+            (*env)->CallVoidMethod(env, g_callback_handler, mid, jtitle);
+            (*env)->DeleteLocalRef(env, jtitle);
+            break;
+        }
+        case RC_CLIENT_EVENT_LEADERBOARD_SUBMITTED: {
+            // Score submitted; ranking info arrives later via LEADERBOARD_SCOREBOARD
+            const rc_client_leaderboard_t* lb = event->leaderboard;
+            if (lb == NULL) break;
+            jmethodID mid = (*env)->GetMethodID(env, cls, "onLeaderboardSubmitted",
+                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;II)V");
+            if (mid == NULL) break;
+            jstring jtitle = safe_new_string_utf(env, lb->title);
+            jstring jscore = safe_new_string_utf(env, lb->tracker_value);
+            jstring jbest = safe_new_string_utf(env, "");
+            (*env)->CallVoidMethod(env, g_callback_handler, mid, jtitle, jscore, jbest, (jint)0, (jint)0);
+            (*env)->DeleteLocalRef(env, jtitle);
+            (*env)->DeleteLocalRef(env, jscore);
+            (*env)->DeleteLocalRef(env, jbest);
+            break;
+        }
+        case RC_CLIENT_EVENT_LEADERBOARD_SCOREBOARD: {
+            const rc_client_leaderboard_t* lb = event->leaderboard;
+            const rc_client_leaderboard_scoreboard_t* sb = event->leaderboard_scoreboard;
+            if (lb == NULL || sb == NULL) break;
+            jmethodID mid = (*env)->GetMethodID(env, cls, "onLeaderboardSubmitted",
+                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;II)V");
+            if (mid == NULL) break;
+            jstring jtitle = safe_new_string_utf(env, lb->title);
+            jstring jscore = safe_new_string_utf(env, sb->submitted_score);
+            jstring jbest = safe_new_string_utf(env, sb->best_score);
+            (*env)->CallVoidMethod(env, g_callback_handler, mid,
+                jtitle, jscore, jbest, (jint)sb->new_rank, (jint)sb->num_entries);
+            (*env)->DeleteLocalRef(env, jtitle);
+            (*env)->DeleteLocalRef(env, jscore);
+            (*env)->DeleteLocalRef(env, jbest);
+            break;
+        }
+        case RC_CLIENT_EVENT_LEADERBOARD_TRACKER_SHOW: {
+            const rc_client_leaderboard_tracker_t* tracker = event->leaderboard_tracker;
+            if (tracker == NULL) break;
+            jmethodID mid = (*env)->GetMethodID(env, cls, "onLeaderboardTrackerShow",
+                "(ILjava/lang/String;)V");
+            if (mid == NULL) break;
+            jstring jdisplay = safe_new_string_utf(env, tracker->display);
+            (*env)->CallVoidMethod(env, g_callback_handler, mid, (jint)tracker->id, jdisplay);
+            (*env)->DeleteLocalRef(env, jdisplay);
+            break;
+        }
+        case RC_CLIENT_EVENT_LEADERBOARD_TRACKER_HIDE: {
+            const rc_client_leaderboard_tracker_t* tracker = event->leaderboard_tracker;
+            if (tracker == NULL) break;
+            jmethodID mid = (*env)->GetMethodID(env, cls, "onLeaderboardTrackerHide", "(I)V");
+            if (mid != NULL) {
+                (*env)->CallVoidMethod(env, g_callback_handler, mid, (jint)tracker->id);
+            }
+            break;
+        }
+        case RC_CLIENT_EVENT_LEADERBOARD_TRACKER_UPDATE: {
+            const rc_client_leaderboard_tracker_t* tracker = event->leaderboard_tracker;
+            if (tracker == NULL) break;
+            jmethodID mid = (*env)->GetMethodID(env, cls, "onLeaderboardTrackerUpdate",
+                "(ILjava/lang/String;)V");
+            if (mid == NULL) break;
+            jstring jdisplay = safe_new_string_utf(env, tracker->display);
+            (*env)->CallVoidMethod(env, g_callback_handler, mid, (jint)tracker->id, jdisplay);
+            (*env)->DeleteLocalRef(env, jdisplay);
+            break;
+        }
+        case RC_CLIENT_EVENT_SERVER_ERROR: {
+            const rc_client_server_error_t* err = event->server_error;
+            if (err == NULL) break;
+            jmethodID mid = (*env)->GetMethodID(env, cls, "onServerError",
+                "(Ljava/lang/String;Ljava/lang/String;)V");
+            if (mid == NULL) break;
+            jstring japi = safe_new_string_utf(env, err->api);
+            jstring jerror = safe_new_string_utf(env, err->error_message);
+            (*env)->CallVoidMethod(env, g_callback_handler, mid, japi, jerror);
+            (*env)->DeleteLocalRef(env, japi);
+            (*env)->DeleteLocalRef(env, jerror);
+            break;
+        }
+        case RC_CLIENT_EVENT_DISCONNECTED: {
+            jmethodID mid = (*env)->GetMethodID(env, cls, "onConnectionChanged", "(Z)V");
+            if (mid != NULL) {
+                (*env)->CallVoidMethod(env, g_callback_handler, mid, JNI_FALSE);
+            }
+            break;
+        }
+        case RC_CLIENT_EVENT_RECONNECTED: {
+            jmethodID mid = (*env)->GetMethodID(env, cls, "onConnectionChanged", "(Z)V");
+            if (mid != NULL) {
+                (*env)->CallVoidMethod(env, g_callback_handler, mid, JNI_TRUE);
+            }
+            break;
+        }
+        default:
+            break;
+    }
+
+    (*env)->DeleteLocalRef(env, cls);
+    if (attached) (*g_jvm)->DetachCurrentThread(g_jvm);
 }
 
 static void client_login_callback(int result, const char* error_message,
@@ -182,6 +432,28 @@ static void client_load_game_callback(int result, const char* error_message,
             LOGI("RetroAchievements game loaded");
         }
         notify_session_callback("onGameLoadResult", request_id, 1, NULL);
+
+        // Notify Java with game session info
+        if (g_jvm != NULL && g_callback_handler != NULL && game != NULL) {
+            int attached = 0;
+            JNIEnv* env = get_jni_env(&attached);
+            if (env != NULL) {
+                jclass cls = (*env)->GetObjectClass(env, g_callback_handler);
+                if (cls != NULL) {
+                    jmethodID mid = (*env)->GetMethodID(env, cls, "onGameSessionStarted",
+                        "(Ljava/lang/String;Ljava/lang/String;)V");
+                    if (mid != NULL) {
+                        jstring jtitle = safe_new_string_utf(env, game->title);
+                        jstring jbadge = safe_new_string_utf(env, game->badge_url);
+                        (*env)->CallVoidMethod(env, g_callback_handler, mid, jtitle, jbadge);
+                        (*env)->DeleteLocalRef(env, jtitle);
+                        (*env)->DeleteLocalRef(env, jbadge);
+                    }
+                    (*env)->DeleteLocalRef(env, cls);
+                }
+                if (attached) (*g_jvm)->DetachCurrentThread(g_jvm);
+            }
+        }
     } else {
         LOGE("RetroAchievements game load failed (%d): %s",
              result, error_message ? error_message : "unknown error");
@@ -208,10 +480,13 @@ Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeCrea
     
     // Enable logging
     rc_client_enable_logging(g_client, RC_CLIENT_LOG_LEVEL_INFO, log_message_callback);
-    
+
+    // Register event handler for achievement notifications
+    rc_client_set_event_handler(g_client, event_handler_callback);
+
     // Store JavaVM for callbacks
     (*env)->GetJavaVM(env, &g_jvm);
-    
+
     LOGI("RC Client created successfully");
     return (jlong)(intptr_t)g_client;
 }
@@ -228,6 +503,12 @@ Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeDest
             g_client = NULL;
         }
         LOGI("RC Client destroyed");
+    }
+
+    // Clean up the callback handler global ref to prevent leaks
+    if (g_callback_handler != NULL) {
+        (*env)->DeleteGlobalRef(env, g_callback_handler);
+        g_callback_handler = NULL;
     }
 }
 
@@ -299,7 +580,7 @@ Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeGene
     }
     
     LOGD("Generated hash: %s", hash);
-    return (*env)->NewStringUTF(env, hash);
+    return safe_new_string_utf(env, hash);
 }
 
 // Process frame - called every frame to check achievements
@@ -456,4 +737,283 @@ Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeBegi
     
     (*env)->ReleaseStringUTFChars(env, game_hash, c_hash);
     return (handle != NULL) ? JNI_TRUE : JNI_FALSE;
+}
+
+// Serialize achievement progress into a byte array
+JNIEXPORT jbyteArray JNICALL
+Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeSerializeProgress(
+    JNIEnv* env, jobject thiz, jlong client_ptr) {
+    (void)thiz;
+    rc_client_t* client = (rc_client_t*)(intptr_t)client_ptr;
+    if (client == NULL) return NULL;
+
+    size_t size = rc_client_progress_size(client);
+    if (size == 0) return NULL;
+
+    uint8_t* buffer = (uint8_t*)malloc(size);
+    if (buffer == NULL) return NULL;
+
+    int result = rc_client_serialize_progress_sized(client, buffer, size);
+    if (result != RC_OK) {
+        LOGE("Failed to serialize progress: %d", result);
+        free(buffer);
+        return NULL;
+    }
+
+    jbyteArray jbuffer = (*env)->NewByteArray(env, (jsize)size);
+    (*env)->SetByteArrayRegion(env, jbuffer, 0, (jsize)size, (jbyte*)buffer);
+    free(buffer);
+    return jbuffer;
+}
+
+// Deserialize achievement progress from a byte array
+JNIEXPORT jboolean JNICALL
+Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeDeserializeProgress(
+    JNIEnv* env, jobject thiz, jlong client_ptr, jbyteArray data) {
+    (void)thiz;
+    rc_client_t* client = (rc_client_t*)(intptr_t)client_ptr;
+    if (client == NULL || data == NULL) return JNI_FALSE;
+
+    jsize len = (*env)->GetArrayLength(env, data);
+    jbyte* bytes = (*env)->GetByteArrayElements(env, data, NULL);
+
+    int result = rc_client_deserialize_progress_sized(client, (const uint8_t*)bytes, (size_t)len);
+    (*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
+
+    if (result != RC_OK) {
+        LOGE("Failed to deserialize progress: %d", result);
+        return JNI_FALSE;
+    }
+    return JNI_TRUE;
+}
+
+// Check if it's safe to pause
+JNIEXPORT jboolean JNICALL
+Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeCanPause(
+    JNIEnv* env, jobject thiz, jlong client_ptr) {
+    (void)thiz;
+    (void)env;
+    rc_client_t* client = (rc_client_t*)(intptr_t)client_ptr;
+    if (client == NULL) return JNI_TRUE;
+
+    return rc_client_can_pause(client, NULL) ? JNI_TRUE : JNI_FALSE;
+}
+
+// Get user game summary (achievement counts)
+JNIEXPORT jintArray JNICALL
+Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeGetUserGameSummary(
+    JNIEnv* env, jobject thiz, jlong client_ptr) {
+    (void)thiz;
+    rc_client_t* client = (rc_client_t*)(intptr_t)client_ptr;
+    if (client == NULL) return NULL;
+
+    rc_client_user_game_summary_t summary;
+    memset(&summary, 0, sizeof(summary));
+    rc_client_get_user_game_summary(client, &summary);
+
+    // Return [numCore, numUnlocked, pointsCore, pointsUnlocked]
+    jint values[4];
+    values[0] = (jint)summary.num_core_achievements;
+    values[1] = (jint)summary.num_unlocked_achievements;
+    values[2] = (jint)summary.points_core;
+    values[3] = (jint)summary.points_unlocked;
+
+    jintArray result = (*env)->NewIntArray(env, 4);
+    (*env)->SetIntArrayRegion(env, result, 0, 4, values);
+    return result;
+}
+
+// Get rich presence message
+JNIEXPORT jstring JNICALL
+Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeGetRichPresenceMessage(
+    JNIEnv* env, jobject thiz, jlong client_ptr) {
+    (void)thiz;
+    rc_client_t* client = (rc_client_t*)(intptr_t)client_ptr;
+    if (client == NULL) return NULL;
+
+    if (!rc_client_has_rich_presence(client)) return NULL;
+
+    char buffer[256];
+    size_t len = rc_client_get_rich_presence_message(client, buffer, sizeof(buffer));
+    if (len == 0) return NULL;
+
+    return safe_new_string_utf(env, buffer);
+}
+
+// Reset achievement/leaderboard state (call on emulator reset)
+JNIEXPORT void JNICALL
+Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeReset(
+    JNIEnv* env, jobject thiz, jlong client_ptr) {
+    (void)env;
+    (void)thiz;
+    rc_client_t* client = (rc_client_t*)(intptr_t)client_ptr;
+    if (client == NULL) return;
+
+    LOGI("Resetting rcheevos achievement state");
+    rc_client_reset(client);
+}
+
+// Unload the current game
+JNIEXPORT void JNICALL
+Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeUnloadGame(
+    JNIEnv* env, jobject thiz, jlong client_ptr) {
+    (void)env;
+    (void)thiz;
+    rc_client_t* client = (rc_client_t*)(intptr_t)client_ptr;
+    if (client == NULL) return;
+
+    LOGI("Unloading game from rcheevos");
+    rc_client_unload_game(client);
+}
+
+// Get the API token for the logged-in user
+JNIEXPORT jstring JNICALL
+Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeGetUserToken(
+    JNIEnv* env, jobject thiz, jlong client_ptr) {
+    (void)thiz;
+    rc_client_t* client = (rc_client_t*)(intptr_t)client_ptr;
+    if (client == NULL) return NULL;
+
+    const rc_client_user_t* user = rc_client_get_user_info(client);
+    if (user == NULL || user->token == NULL) return NULL;
+
+    return safe_new_string_utf(env, user->token);
+}
+
+// ========== JSON Builder Helpers ==========
+
+typedef struct {
+    char* buf;
+    size_t len;
+    size_t cap;
+} json_buf_t;
+
+static void json_buf_ensure(json_buf_t* jb, size_t extra) {
+    if (jb->len + extra >= jb->cap) {
+        size_t new_cap = (jb->cap + extra) * 2;
+        char* new_buf = (char*)realloc(jb->buf, new_cap);
+        if (new_buf == NULL) return;
+        jb->buf = new_buf;
+        jb->cap = new_cap;
+    }
+}
+
+static void json_buf_append(json_buf_t* jb, const char* str) {
+    size_t slen = strlen(str);
+    json_buf_ensure(jb, slen + 1);
+    memcpy(jb->buf + jb->len, str, slen);
+    jb->len += slen;
+    jb->buf[jb->len] = '\0';
+}
+
+static void json_buf_append_escaped(json_buf_t* jb, const char* str) {
+    if (str == NULL) { json_buf_append(jb, "null"); return; }
+    json_buf_append(jb, "\"");
+    for (const char* p = str; *p; ++p) {
+        switch (*p) {
+            case '"':  json_buf_append(jb, "\\\""); break;
+            case '\\': json_buf_append(jb, "\\\\"); break;
+            case '\n': json_buf_append(jb, "\\n"); break;
+            case '\r': json_buf_append(jb, "\\r"); break;
+            case '\t': json_buf_append(jb, "\\t"); break;
+            default: {
+                json_buf_ensure(jb, 2);
+                jb->buf[jb->len++] = *p;
+                jb->buf[jb->len] = '\0';
+            }
+        }
+    }
+    json_buf_append(jb, "\"");
+}
+
+// Get achievement list as JSON string
+JNIEXPORT jstring JNICALL
+Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeGetAchievementListJson(
+    JNIEnv* env, jobject thiz, jlong client_ptr) {
+    (void)thiz;
+    rc_client_t* client = (rc_client_t*)(intptr_t)client_ptr;
+    if (client == NULL) return NULL;
+
+    if (!rc_client_has_achievements(client)) return NULL;
+
+    rc_client_achievement_list_t* list = rc_client_create_achievement_list(
+        client, RC_CLIENT_ACHIEVEMENT_CATEGORY_CORE,
+        RC_CLIENT_ACHIEVEMENT_LIST_GROUPING_PROGRESS);
+    if (list == NULL) return NULL;
+
+    json_buf_t jb = {0};
+    jb.cap = 4096;
+    jb.buf = (char*)malloc(jb.cap);
+    if (jb.buf == NULL) {
+        rc_client_destroy_achievement_list(list);
+        return NULL;
+    }
+    jb.buf[0] = '\0';
+
+    json_buf_append(&jb, "{\"buckets\":[");
+
+    int first_bucket = 1;
+    for (uint32_t i = 0; i < list->num_buckets; ++i) {
+        const rc_client_achievement_bucket_t* bucket = &list->buckets[i];
+        if (bucket->num_achievements == 0) continue;
+
+        if (!first_bucket) json_buf_append(&jb, ",");
+        first_bucket = 0;
+
+        json_buf_append(&jb, "{\"label\":");
+        json_buf_append_escaped(&jb, bucket->label);
+
+        char tmp[128];
+        snprintf(tmp, sizeof(tmp), ",\"bucket_type\":%u,\"achievements\":[",
+                 (unsigned)bucket->bucket_type);
+        json_buf_append(&jb, tmp);
+
+        for (uint32_t j = 0; j < bucket->num_achievements; ++j) {
+            const rc_client_achievement_t* ach = bucket->achievements[j];
+            if (j > 0) json_buf_append(&jb, ",");
+
+            json_buf_append(&jb, "{\"id\":");
+            snprintf(tmp, sizeof(tmp), "%u", (unsigned)ach->id);
+            json_buf_append(&jb, tmp);
+
+            json_buf_append(&jb, ",\"title\":");
+            json_buf_append_escaped(&jb, ach->title);
+
+            json_buf_append(&jb, ",\"description\":");
+            json_buf_append_escaped(&jb, ach->description);
+
+            json_buf_append(&jb, ",\"badge_url\":");
+            json_buf_append_escaped(&jb, ach->badge_url);
+
+            json_buf_append(&jb, ",\"badge_locked_url\":");
+            json_buf_append_escaped(&jb, ach->badge_locked_url);
+
+            snprintf(tmp, sizeof(tmp),
+                     ",\"points\":%u,\"state\":%u,\"unlocked\":%u",
+                     (unsigned)ach->points, (unsigned)ach->state,
+                     (unsigned)ach->unlocked);
+            json_buf_append(&jb, tmp);
+
+            json_buf_append(&jb, ",\"measured_progress\":");
+            json_buf_append_escaped(&jb, ach->measured_progress);
+
+            snprintf(tmp, sizeof(tmp),
+                     ",\"measured_percent\":%.1f,\"rarity\":%.1f,\"rarity_hardcore\":%.1f,\"type\":%u,\"unlock_time\":%ld",
+                     ach->measured_percent, ach->rarity, ach->rarity_hardcore,
+                     (unsigned)ach->type, (long)ach->unlock_time);
+            json_buf_append(&jb, tmp);
+
+            json_buf_append(&jb, "}");
+        }
+
+        json_buf_append(&jb, "]}");
+    }
+
+    json_buf_append(&jb, "]}");
+
+    rc_client_destroy_achievement_list(list);
+
+    jstring result = safe_new_string_utf(env, jb.buf);
+    free(jb.buf);
+    return result;
 }
