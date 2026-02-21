@@ -1,6 +1,5 @@
 package paulscode.android.mupen64plusae.retroachievements;
 
-import android.graphics.Bitmap;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.LayoutInflater;
@@ -23,11 +22,14 @@ public class AchievementListAdapter extends RecyclerView.Adapter<RecyclerView.Vi
 
     private final List<AchievementItem> mItems;
     private final AchievementBadgeCache mBadgeCache;
+    private final boolean mHardcoreSessionActive;
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
 
-    public AchievementListAdapter(List<AchievementItem> items, AchievementBadgeCache badgeCache) {
+    public AchievementListAdapter(List<AchievementItem> items, AchievementBadgeCache badgeCache,
+                                  boolean hardcoreSessionActive) {
         mItems = items;
         mBadgeCache = badgeCache;
+        mHardcoreSessionActive = hardcoreSessionActive;
     }
 
     @Override
@@ -41,9 +43,13 @@ public class AchievementListAdapter extends RecyclerView.Adapter<RecyclerView.Vi
         LayoutInflater inflater = LayoutInflater.from(parent.getContext());
         if (viewType == VIEW_TYPE_HEADER) {
             View view = inflater.inflate(R.layout.ra_list_section_header, parent, false);
+            view.setFocusable(false);
+            view.setFocusableInTouchMode(false);
             return new HeaderViewHolder(view);
         } else {
             View view = inflater.inflate(R.layout.ra_list_item_achievement, parent, false);
+            view.setFocusable(true);
+            view.setFocusableInTouchMode(true);
             return new AchievementViewHolder(view);
         }
     }
@@ -54,7 +60,7 @@ public class AchievementListAdapter extends RecyclerView.Adapter<RecyclerView.Vi
         if (holder instanceof HeaderViewHolder) {
             ((HeaderViewHolder) holder).bind(item);
         } else if (holder instanceof AchievementViewHolder) {
-            ((AchievementViewHolder) holder).bind(item, position);
+            ((AchievementViewHolder) holder).bind(item, position, mHardcoreSessionActive);
         }
     }
 
@@ -79,6 +85,7 @@ public class AchievementListAdapter extends RecyclerView.Adapter<RecyclerView.Vi
     class AchievementViewHolder extends RecyclerView.ViewHolder {
         private final ImageView mBadge;
         private final TextView mTitle;
+        private final TextView mUnlockMode;
         private final TextView mType;
         private final TextView mDescription;
         private final TextView mRarity;
@@ -92,6 +99,7 @@ public class AchievementListAdapter extends RecyclerView.Adapter<RecyclerView.Vi
             super(itemView);
             mBadge = itemView.findViewById(R.id.ra_item_badge);
             mTitle = itemView.findViewById(R.id.ra_item_title);
+            mUnlockMode = itemView.findViewById(R.id.ra_item_unlock_mode);
             mType = itemView.findViewById(R.id.ra_item_type);
             mDescription = itemView.findViewById(R.id.ra_item_description);
             mRarity = itemView.findViewById(R.id.ra_item_rarity);
@@ -99,9 +107,11 @@ public class AchievementListAdapter extends RecyclerView.Adapter<RecyclerView.Vi
             mProgressBar = itemView.findViewById(R.id.ra_item_progress_bar);
             mProgressText = itemView.findViewById(R.id.ra_item_progress_text);
             mPoints = itemView.findViewById(R.id.ra_item_points);
+
+            itemView.setOnFocusChangeListener((view, hasFocus) -> view.setActivated(hasFocus));
         }
 
-        void bind(AchievementItem item, int position) {
+        void bind(AchievementItem item, int position, boolean hardcoreSessionActive) {
             mBoundPosition = position;
 
             mTitle.setText(item.title);
@@ -111,6 +121,19 @@ public class AchievementListAdapter extends RecyclerView.Adapter<RecyclerView.Vi
             // Alpha for locked achievements
             float alpha = item.isUnlocked() ? 1.0f : 0.6f;
             itemView.setAlpha(alpha);
+
+            if (item.isUnlockedInHardcore() && item.isUnlockedInSoftcore()) {
+                mUnlockMode.setText(R.string.ra_list_unlock_mode_both);
+                mUnlockMode.setVisibility(View.VISIBLE);
+            } else if (item.isUnlockedInHardcore()) {
+                mUnlockMode.setText(R.string.ra_list_unlock_mode_hardcore);
+                mUnlockMode.setVisibility(View.VISIBLE);
+            } else if (item.isUnlockedInSoftcore()) {
+                mUnlockMode.setText(R.string.ra_list_unlock_mode_softcore);
+                mUnlockMode.setVisibility(View.VISIBLE);
+            } else {
+                mUnlockMode.setVisibility(View.GONE);
+            }
 
             // Type indicator
             if (item.type == AchievementItem.TYPE_MISSABLE) {
@@ -127,7 +150,7 @@ public class AchievementListAdapter extends RecyclerView.Adapter<RecyclerView.Vi
             }
 
             // Rarity
-            float rarityValue = item.rarityHardcore > 0 ? item.rarityHardcore : item.rarity;
+            float rarityValue = item.getDisplayRarity(hardcoreSessionActive);
             if (rarityValue > 0) {
                 mRarity.setText(String.format(itemView.getContext().getString(R.string.ra_list_rarity), rarityValue));
                 mRarity.setVisibility(View.VISIBLE);

@@ -105,7 +105,36 @@ public class AchievementItem {
 
     /** Check if this achievement has been unlocked */
     public boolean isUnlocked() {
-        return state == STATE_UNLOCKED;
+        return state == STATE_UNLOCKED || unlocked != UNLOCKED_NONE;
+    }
+
+    /** Check if this achievement has been unlocked in softcore mode */
+    public boolean isUnlockedInSoftcore() {
+        return (unlocked & UNLOCKED_SOFTCORE) != 0;
+    }
+
+    /** Check if this achievement has been unlocked in hardcore mode */
+    public boolean isUnlockedInHardcore() {
+        return (unlocked & UNLOCKED_HARDCORE) != 0;
+    }
+
+    /**
+     * Select rarity display based on current session mode and unlock metadata.
+     */
+    public float getDisplayRarity(boolean hardcoreSessionActive) {
+        if (hardcoreSessionActive && rarityHardcore > 0) {
+            return rarityHardcore;
+        }
+        if (!hardcoreSessionActive && rarity > 0) {
+            return rarity;
+        }
+        if (isUnlockedInHardcore() && !isUnlockedInSoftcore() && rarityHardcore > 0) {
+            return rarityHardcore;
+        }
+        if (rarity > 0) {
+            return rarity;
+        }
+        return rarityHardcore;
     }
 
     /**

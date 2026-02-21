@@ -183,6 +183,13 @@ public class RCheevosNative {
      * @param enabled True to enable hardcore mode
      */
     public native void nativeSetHardcoreEnabled(long clientPtr, boolean enabled);
+
+    /**
+     * Get current hardcore mode state from native runtime.
+     * @param clientPtr Client pointer
+     * @return true if hardcore mode is enabled
+     */
+    public native boolean nativeGetHardcoreEnabled(long clientPtr);
     
     /**
      * Generate a RetroAchievements hash for a game

@@ -229,7 +229,13 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
      * Check if hardcore restrictions should be enforced for the current session.
      */
     public boolean isHardcoreSessionActive() {
-        return mHardcoreEnabled && mInitialized && mSessionActive && isLoggedIn();
+        if (!mInitialized || mClientPtr == 0 || !mSessionActive || !isLoggedIn()) {
+            return false;
+        }
+
+        // Read from native runtime to avoid stale Java-side state.
+        mHardcoreEnabled = mNative.nativeGetHardcoreEnabled(mClientPtr);
+        return mHardcoreEnabled;
     }
     
     /**

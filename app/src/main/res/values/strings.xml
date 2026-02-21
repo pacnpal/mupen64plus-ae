@@ -1071,6 +1071,9 @@
     <string name="ra_list_close">Close</string>
     <string name="ra_list_badge_desc">Achievement badge</string>
     <string name="ra_list_rarity">%.1f%% of players</string>
+    <string name="ra_list_unlock_mode_softcore">Softcore</string>
+    <string name="ra_list_unlock_mode_hardcore">Hardcore</string>
+    <string name="ra_list_unlock_mode_both">Both</string>
     <string name="ra_list_type_missable">Missable</string>
     <string name="ra_list_type_progression">Progression</string>
     <string name="ra_list_type_win">Win Condition</string>

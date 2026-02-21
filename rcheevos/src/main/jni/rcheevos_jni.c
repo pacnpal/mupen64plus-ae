@@ -542,6 +542,19 @@ Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeSetH
     }
 }
 
+// Get current hardcore enabled state
+JNIEXPORT jboolean JNICALL
+Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeGetHardcoreEnabled(
+    JNIEnv* env, jobject thiz, jlong client_ptr) {
+    (void)env;
+    (void)thiz;
+    rc_client_t* client = (rc_client_t*)(intptr_t)client_ptr;
+    if (client == NULL) {
+        return JNI_FALSE;
+    }
+    return rc_client_get_hardcore_enabled(client) ? JNI_TRUE : JNI_FALSE;
+}
+
 // Generate game hash
 JNIEXPORT jstring JNICALL
 Java_paulscode_android_mupen64plusae_retroachievements_RCheevosNative_nativeGenerateHash(
