@@ -32,6 +32,17 @@ public class RetroAchievementsHttpClient {
     
     private final ExecutorService mExecutor;
     private final Handler mMainHandler;
+
+    private static String sanitizeUrlForLog(String url) {
+        if (url == null) {
+            return "null";
+        }
+        int queryIndex = url.indexOf('?');
+        if (queryIndex >= 0) {
+            return url.substring(0, queryIndex) + "?<redacted>";
+        }
+        return url;
+    }
     
     public interface HttpCallback {
         void onResponse(int statusCode, String responseBody);
@@ -70,7 +81,7 @@ public class RetroAchievementsHttpClient {
                 }
                 
             } catch (IOException e) {
-                Log.e(TAG, "HTTP GET error: " + urlString, e);
+                Log.e(TAG, "HTTP GET error: " + sanitizeUrlForLog(urlString), e);
                 mMainHandler.post(() -> callback.onError(e.getMessage()));
             }
         });
@@ -113,7 +124,7 @@ public class RetroAchievementsHttpClient {
                 }
                 
             } catch (IOException e) {
-                Log.e(TAG, "HTTP POST error: " + urlString, e);
+                Log.e(TAG, "HTTP POST error: " + sanitizeUrlForLog(urlString), e);
                 mMainHandler.post(() -> callback.onError(e.getMessage()));
             }
         });

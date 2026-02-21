@@ -414,6 +414,11 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
 
     private boolean isRetroAchievementsHardcoreActive()
     {
+        return mRetroAchievementsManager != null && mRetroAchievementsManager.isHardcoreRestrictionsActive();
+    }
+
+    private boolean isRetroAchievementsHardcoreSessionActive()
+    {
         return mRetroAchievementsManager != null && mRetroAchievementsManager.isHardcoreSessionActive();
     }
 
@@ -421,10 +426,8 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
         if (mRetroAchievementsManager == null) return;
         byte[] raData = mRetroAchievementsManager.serializeProgress();
         if (raData != null) {
-            try {
-                FileOutputStream fos = new FileOutputStream(savePath + ".ra");
+            try (FileOutputStream fos = new FileOutputStream(savePath + ".ra")) {
                 fos.write(raData);
-                fos.close();
                 Log.i(TAG, "RetroAchievements: Saved progress to " + savePath + ".ra");
             } catch (IOException e) {
                 Log.e(TAG, "RetroAchievements: Failed to save progress", e);
@@ -436,11 +439,28 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
         if (mRetroAchievementsManager == null) return;
         File raFile = new File(savePath + ".ra");
         if (raFile.exists()) {
-            try {
-                FileInputStream fis = new FileInputStream(raFile);
-                byte[] raData = new byte[(int) raFile.length()];
-                fis.read(raData);
-                fis.close();
+            long fileLength = raFile.length();
+            if (fileLength > Integer.MAX_VALUE) {
+                Log.e(TAG, "RetroAchievements: Progress file is too large to load: " + raFile.getAbsolutePath());
+                return;
+            }
+
+            try (FileInputStream fis = new FileInputStream(raFile)) {
+                byte[] raData = new byte[(int) fileLength];
+                int offset = 0;
+                while (offset < raData.length) {
+                    int bytesRead = fis.read(raData, offset, raData.length - offset);
+                    if (bytesRead < 0) {
+                        break;
+                    }
+                    offset += bytesRead;
+                }
+
+                if (offset != raData.length) {
+                    Log.e(TAG, "RetroAchievements: Incomplete progress read for " + savePath + ".ra");
+                    return;
+                }
+
                 if (mRetroAchievementsManager.deserializeProgress(raData)) {
                     Log.i(TAG, "RetroAchievements: Restored progress from " + savePath + ".ra");
                 }
@@ -817,7 +837,9 @@ public class CoreService extends Service implements CoreInterface.OnFpsChangedLi
                     }
                 }
 
-                boolean hardcoreSessionActive = isRetroAchievementsHardcoreActive();
+                // Startup gating should only use an active hardcore session.
+                // Pending login/load must not permanently skip one-time cheat/autosave setup.
+                boolean hardcoreSessionActive = isRetroAchievementsHardcoreSessionActive();
 
                 if (mUsingNetplay) {
                     mCoreInterface.emuSetFramelimiter(true);

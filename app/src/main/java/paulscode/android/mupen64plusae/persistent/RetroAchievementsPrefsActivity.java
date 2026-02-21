@@ -50,6 +50,7 @@ public class RetroAchievementsPrefsActivity extends AppCompatPreferenceActivity
     private Preference mLogoutPreference;
     private Preference mEnabledPreference;
     private Preference mHardcorePreference;
+    private boolean mIsLoginValidationInProgress = false;
 
     @Override
     protected void attachBaseContext(Context newBase) {
@@ -200,27 +201,51 @@ public class RetroAchievementsPrefsActivity extends AppCompatPreferenceActivity
     }
 
     private void performLogin(String username, String credential, boolean useToken) {
-        // Save credentials
-        mAppData.setRetroAchievementsUsername(username);
-        if (useToken) {
-            mAppData.setRetroAchievementsToken(credential);
-        } else {
-            mAppData.setRetroAchievementsPassword(credential);
-        }
-        mAppData.setRetroAchievementsEnabled(true);
-
-        // Update manager
         RetroAchievementsManager manager = RetroAchievementsManager.getInstance(this);
-        if (useToken) {
-            manager.setTokenCredentials(username, credential);
-        } else {
-            manager.setCredentials(username, credential);
+        if (!manager.initialize()) {
+            Toast.makeText(this, getString(R.string.ra_login_failed,
+                            getString(R.string.retroachievements_login_validation_failed_reason)),
+                    Toast.LENGTH_LONG).show();
+            return;
         }
 
-        Toast.makeText(this, getString(R.string.retroachievements_login_success, username),
-                Toast.LENGTH_LONG).show();
-
+        mIsLoginValidationInProgress = true;
         updateLoginState();
+
+        Toast.makeText(this, R.string.retroachievements_login_validating, Toast.LENGTH_SHORT).show();
+
+        manager.validateCredentials(username, credential, useToken, (success, errorMessage, resolvedToken) -> {
+            mIsLoginValidationInProgress = false;
+
+            if (success) {
+                mAppData.setRetroAchievementsUsername(username);
+
+                if (!TextUtils.isEmpty(resolvedToken)) {
+                    mAppData.setRetroAchievementsToken(resolvedToken);
+                    manager.setTokenCredentials(username, resolvedToken);
+                } else if (useToken) {
+                    mAppData.setRetroAchievementsToken(credential);
+                    manager.setTokenCredentials(username, credential);
+                } else {
+                    mAppData.setRetroAchievementsPassword(credential);
+                    manager.setCredentials(username, credential);
+                }
+
+                mAppData.setRetroAchievementsEnabled(true);
+                mAppData.setRetroAchievementsCredentialsVerified(true);
+
+                Toast.makeText(this, getString(R.string.retroachievements_login_success, username),
+                        Toast.LENGTH_LONG).show();
+            } else {
+                String message = !TextUtils.isEmpty(errorMessage)
+                        ? errorMessage
+                        : getString(R.string.retroachievements_login_validation_failed_reason);
+                Toast.makeText(this, getString(R.string.ra_login_failed, message), Toast.LENGTH_LONG).show();
+            }
+
+            updateLoginState();
+        });
+
     }
 
     private void performLogout() {
@@ -242,25 +267,33 @@ public class RetroAchievementsPrefsActivity extends AppCompatPreferenceActivity
     private void updateLoginState() {
         boolean hasCredentials = mAppData.getRetroAchievementsPassword() != null
                 || mAppData.getRetroAchievementsToken() != null;
-        boolean isLoggedIn = mAppData.getRetroAchievementsUsername() != null && hasCredentials;
+        String username = mAppData.getRetroAchievementsUsername();
+        boolean isLoggedIn = !TextUtils.isEmpty(username)
+                && hasCredentials
+                && mAppData.isRetroAchievementsCredentialsVerified();
         boolean isEnabled = mAppData.isRetroAchievementsEnabled();
 
         if (mLoginPreference != null) {
-            mLoginPreference.setEnabled(!isLoggedIn && isEnabled);
-            if (isLoggedIn) {
+            mLoginPreference.setEnabled(!mIsLoginValidationInProgress && !isLoggedIn && isEnabled);
+            if (mIsLoginValidationInProgress) {
+                mLoginPreference.setSummary(R.string.retroachievements_login_validating);
+            } else if (isLoggedIn) {
                 mLoginPreference.setSummary(getString(R.string.retroachievements_logged_in_as,
-                        mAppData.getRetroAchievementsUsername()));
+                        username));
+            } else if (!TextUtils.isEmpty(username) && hasCredentials) {
+                mLoginPreference.setSummary(getString(R.string.retroachievements_login_needs_validation,
+                        username));
             } else {
                 mLoginPreference.setSummary(R.string.retroachievements_login_summary);
             }
         }
 
         if (mLogoutPreference != null) {
-            mLogoutPreference.setEnabled(isLoggedIn);
+            mLogoutPreference.setEnabled(!mIsLoginValidationInProgress && hasCredentials);
         }
 
         if (mHardcorePreference != null) {
-            mHardcorePreference.setEnabled(isEnabled);
+            mHardcorePreference.setEnabled(!mIsLoginValidationInProgress && isEnabled);
         }
     }
 }

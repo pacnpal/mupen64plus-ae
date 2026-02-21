@@ -477,8 +477,10 @@ public class GlobalPrefs
         touchscreenCustomSkinsDir = context.getFilesDir().getAbsolutePath() + "/CustomSkins";
 
         File externalRomsDir = context.getExternalFilesDir(null);
-        if (externalRomsDir != null && !externalRomsDir.mkdirs()) {
-            Log.e("GlobalPrefs", "Unable to make path " + externalRomsDir.getAbsolutePath());
+        if (externalRomsDir != null) {
+            if (!externalRomsDir.exists() && !externalRomsDir.mkdirs()) {
+                Log.e("GlobalPrefs", "Unable to make path " + externalRomsDir.getAbsolutePath());
+            }
         }
 
         externalRomsDirNoSaf = externalRomsDir != null ? externalRomsDir.getAbsolutePath() : null;

@@ -113,7 +113,14 @@ public class PixelBuffer {
 
     public void releaseSurfaceTexture()
     {
-        mSurfaceTexture.mSurfaceTexture.release();
+        if (mSurface != null) {
+            mSurface.release();
+            mSurface = null;
+        }
+        if (mSurfaceTexture != null) {
+            mSurfaceTexture.mSurfaceTexture.release();
+            mSurfaceTexture = null;
+        }
     }
 
     public void destroyGlContext()

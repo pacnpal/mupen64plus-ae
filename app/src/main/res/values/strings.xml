@@ -1013,6 +1013,9 @@
     <string name="retroachievements_logged_in_as">Logged in as %s</string>
     <string name="retroachievements_login_empty">Username and credential cannot be empty</string>
     <string name="retroachievements_login_success">Logged in as %s</string>
+    <string name="retroachievements_login_validating">Validating credentials…</string>
+    <string name="retroachievements_login_needs_validation">Credentials for %s are saved but not verified. Tap Login to verify.</string>
+    <string name="retroachievements_login_validation_failed_reason">Unable to validate credentials</string>
     
     <string name="retroachievements_username_hint">Username</string>
     <string name="retroachievements_login_mode_password">Password</string>

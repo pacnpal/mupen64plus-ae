@@ -35,6 +35,8 @@ import android.os.Build;
 
 import androidx.core.content.pm.PackageInfoCompat;
 import androidx.preference.PreferenceManager;
+import androidx.security.crypto.EncryptedSharedPreferences;
+import androidx.security.crypto.MasterKey;
 
 import android.os.Environment;
 import android.text.Html;
@@ -312,6 +314,9 @@ public class AppData
     /** The object used to persist the settings. */
     private final SharedPreferences mPreferences;
 
+    /** Secure preferences used for sensitive values. */
+    private SharedPreferences mSecurePreferences;
+
     /** The parent directory containing all user-writable data files. */
     final String legacyUserDataDir;
 
@@ -347,7 +352,14 @@ public class AppData
     private static final String KEY_RA_TOKEN = "retroachievementsToken";
     private static final String KEY_RA_ENABLED = "retroachievementsEnabled";
     private static final String KEY_RA_HARDCORE = "retroachievementsHardcore";
+    private static final String KEY_RA_VERIFIED = "retroachievementsVerified";
+    private static final String KEY_RA_SECURE_CLEAR_PENDING = "retroachievementsSecureClearPending";
+    private static final String RA_SECURE_PREFS_NAME = "secure_app_prefs";
     // ... add more as needed
+
+    private interface SecurePrefsEditAction {
+        void apply(SharedPreferences.Editor editor);
+    }
     
     /**
      * Instantiates a new object to retrieve and persist app data.
@@ -363,6 +375,8 @@ public class AppData
 
         // Preference object for persisting app data
         mPreferences = PreferenceManager.getDefaultSharedPreferences( context );
+        mSecurePreferences = createSecurePreferences(context);
+        migrateRetroAchievementsSecrets();
         
         PackageInfo info;
         String version = "";
@@ -418,6 +432,140 @@ public class AppData
                 intent.resolveActivity(context.getPackageManager()) == null);
 
         manufacturer = android.os.Build.MANUFACTURER;
+    }
+
+    private SharedPreferences createSecurePreferences(Context context) {
+        try {
+            MasterKey masterKey = new MasterKey.Builder(context)
+                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                    .build();
+            return EncryptedSharedPreferences.create(
+                    context,
+                    RA_SECURE_PREFS_NAME,
+                    masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            );
+        } catch (Exception e) {
+            Log.e("AppData", "Falling back to default prefs for secure values", e);
+            return mPreferences;
+        }
+    }
+
+    private void handleSecurePreferencesFailure(String operation, Exception error) {
+        if (mSecurePreferences == mPreferences) {
+            Log.e("AppData", "SharedPreferences failure during " + operation, error);
+            return;
+        }
+
+        Log.e("AppData", "Secure preferences failure during " + operation + ", falling back", error);
+        mSecurePreferences = mPreferences;
+        mPreferences.edit().putBoolean(KEY_RA_SECURE_CLEAR_PENDING, true).apply();
+
+        try {
+            if (!mContext.deleteSharedPreferences(RA_SECURE_PREFS_NAME)) {
+                Log.w("AppData", "Failed to delete encrypted preference file during recovery");
+            }
+        } catch (Exception deleteError) {
+            Log.w("AppData", "Exception deleting encrypted preference file during recovery", deleteError);
+        }
+    }
+
+    private String getSecureRetroAchievementsString(String key) {
+        try {
+            return mSecurePreferences.getString(key, null);
+        } catch (Exception e) {
+            handleSecurePreferencesFailure("read of " + key, e);
+            return mPreferences.getString(key, null);
+        }
+    }
+
+    private boolean applySecureEdit(SecurePrefsEditAction action, String operation) {
+        try {
+            SharedPreferences.Editor editor = mSecurePreferences.edit();
+            action.apply(editor);
+            editor.apply();
+            return true;
+        } catch (Exception e) {
+            handleSecurePreferencesFailure(operation, e);
+            try {
+                SharedPreferences.Editor fallbackEditor = mPreferences.edit();
+                action.apply(fallbackEditor);
+                fallbackEditor.apply();
+                return true;
+            } catch (Exception fallbackError) {
+                Log.e("AppData", "Fallback preferences failure during " + operation, fallbackError);
+                return false;
+            }
+        }
+    }
+
+    private boolean commitSecureEdit(SecurePrefsEditAction action, String operation) {
+        try {
+            SharedPreferences.Editor editor = mSecurePreferences.edit();
+            action.apply(editor);
+            return editor.commit();
+        } catch (Exception e) {
+            handleSecurePreferencesFailure(operation, e);
+            return false;
+        }
+    }
+
+    private void migrateRetroAchievementsSecrets() {
+        if (mSecurePreferences == mPreferences) {
+            return;
+        }
+
+        boolean hasLegacySecrets = mPreferences.contains(KEY_RA_USERNAME)
+                || mPreferences.contains(KEY_RA_PASSWORD)
+                || mPreferences.contains(KEY_RA_TOKEN);
+        boolean secureClearPending = mPreferences.getBoolean(KEY_RA_SECURE_CLEAR_PENDING, false);
+
+        if (!hasLegacySecrets && !secureClearPending) {
+            return;
+        }
+
+        if (hasLegacySecrets) {
+            if (!commitSecureEdit(editor -> {
+                editor.remove(KEY_RA_USERNAME)
+                        .remove(KEY_RA_PASSWORD)
+                        .remove(KEY_RA_TOKEN);
+                if (mPreferences.contains(KEY_RA_USERNAME)) {
+                    editor.putString(KEY_RA_USERNAME, mPreferences.getString(KEY_RA_USERNAME, null));
+                }
+                if (mPreferences.contains(KEY_RA_PASSWORD)) {
+                    editor.putString(KEY_RA_PASSWORD, mPreferences.getString(KEY_RA_PASSWORD, null));
+                }
+                if (mPreferences.contains(KEY_RA_TOKEN)) {
+                    editor.putString(KEY_RA_TOKEN, mPreferences.getString(KEY_RA_TOKEN, null));
+                }
+            }, "migration write")) {
+                Log.e("AppData", "Failed to migrate RetroAchievements secrets to encrypted storage");
+                return;
+            }
+
+            mPreferences.edit()
+                    .remove(KEY_RA_USERNAME)
+                    .remove(KEY_RA_PASSWORD)
+                    .remove(KEY_RA_TOKEN)
+                    .remove(KEY_RA_SECURE_CLEAR_PENDING)
+                    .apply();
+            return;
+        }
+
+        // Recovery case: fallback-mode clear happened while secure prefs were unavailable.
+        if (!commitSecureEdit(editor -> editor
+                        .remove(KEY_RA_USERNAME)
+                        .remove(KEY_RA_PASSWORD)
+                        .remove(KEY_RA_TOKEN),
+                "migration recovery clear")) {
+            Log.e("AppData", "Failed to clear stale encrypted RetroAchievements secrets");
+            return;
+        }
+
+        mPreferences.edit()
+                .remove(KEY_RA_SECURE_CLEAR_PENDING)
+                .apply();
     }
 
     /**
@@ -749,7 +897,11 @@ public class AppData
      * @return Username or null if not set
      */
     public String getRetroAchievementsUsername() {
-        return mPreferences.getString(KEY_RA_USERNAME, null);
+        String username = getSecureRetroAchievementsString(KEY_RA_USERNAME);
+        if (username == null && mSecurePreferences != mPreferences) {
+            username = mPreferences.getString(KEY_RA_USERNAME, null);
+        }
+        return username;
     }
     
     /**
@@ -757,7 +909,17 @@ public class AppData
      * @param username Username to store
      */
     public void setRetroAchievementsUsername(String username) {
-        mPreferences.edit().putString(KEY_RA_USERNAME, username).apply();
+        if (!applySecureEdit(editor -> editor.putString(KEY_RA_USERNAME, username),
+                "write of " + KEY_RA_USERNAME)) {
+            return;
+        }
+        if (mSecurePreferences != mPreferences) {
+            mPreferences.edit()
+                    .remove(KEY_RA_USERNAME)
+                    .remove(KEY_RA_SECURE_CLEAR_PENDING)
+                    .apply();
+        }
+        setRetroAchievementsCredentialsVerified(false);
     }
     
     /**
@@ -765,7 +927,11 @@ public class AppData
      * @return Password or null if not set
      */
     public String getRetroAchievementsPassword() {
-        return mPreferences.getString(KEY_RA_PASSWORD, null);
+        String password = getSecureRetroAchievementsString(KEY_RA_PASSWORD);
+        if (password == null && mSecurePreferences != mPreferences) {
+            password = mPreferences.getString(KEY_RA_PASSWORD, null);
+        }
+        return password;
     }
 
     /**
@@ -773,7 +939,11 @@ public class AppData
      * @return Token or null if not set
      */
     public String getRetroAchievementsToken() {
-        return mPreferences.getString(KEY_RA_TOKEN, null);
+        String token = getSecureRetroAchievementsString(KEY_RA_TOKEN);
+        if (token == null && mSecurePreferences != mPreferences) {
+            token = mPreferences.getString(KEY_RA_TOKEN, null);
+        }
+        return token;
     }
 
     /**
@@ -781,10 +951,20 @@ public class AppData
      * @param token Token to store
      */
     public void setRetroAchievementsToken(String token) {
-        mPreferences.edit()
-                .putString(KEY_RA_TOKEN, token)
-                .remove(KEY_RA_PASSWORD)
-                .apply();
+        if (!applySecureEdit(editor -> editor
+                        .putString(KEY_RA_TOKEN, token)
+                        .remove(KEY_RA_PASSWORD),
+                "write of " + KEY_RA_TOKEN)) {
+            return;
+        }
+        if (mSecurePreferences != mPreferences) {
+            mPreferences.edit()
+                    .remove(KEY_RA_TOKEN)
+                    .remove(KEY_RA_PASSWORD)
+                    .remove(KEY_RA_SECURE_CLEAR_PENDING)
+                    .apply();
+        }
+        setRetroAchievementsCredentialsVerified(false);
     }
 
     /**
@@ -792,10 +972,20 @@ public class AppData
      * @param password Password to store
      */
     public void setRetroAchievementsPassword(String password) {
-        mPreferences.edit()
-                .putString(KEY_RA_PASSWORD, password)
-                .remove(KEY_RA_TOKEN)
-                .apply();
+        if (!applySecureEdit(editor -> editor
+                        .putString(KEY_RA_PASSWORD, password)
+                        .remove(KEY_RA_TOKEN),
+                "write of " + KEY_RA_PASSWORD)) {
+            return;
+        }
+        if (mSecurePreferences != mPreferences) {
+            mPreferences.edit()
+                    .remove(KEY_RA_PASSWORD)
+                    .remove(KEY_RA_TOKEN)
+                    .remove(KEY_RA_SECURE_CLEAR_PENDING)
+                    .apply();
+        }
+        setRetroAchievementsCredentialsVerified(false);
     }
     
     /**
@@ -829,15 +1019,45 @@ public class AppData
     public void setRetroAchievementsHardcore(boolean hardcore) {
         mPreferences.edit().putBoolean(KEY_RA_HARDCORE, hardcore).apply();
     }
+
+    /**
+     * Check if stored RetroAchievements credentials have been validated.
+     */
+    public boolean isRetroAchievementsCredentialsVerified() {
+        return mPreferences.getBoolean(KEY_RA_VERIFIED, false);
+    }
+
+    /**
+     * Mark RetroAchievements credentials as validated or unvalidated.
+     */
+    public void setRetroAchievementsCredentialsVerified(boolean verified) {
+        mPreferences.edit().putBoolean(KEY_RA_VERIFIED, verified).apply();
+    }
     
     /**
      * Clear all RetroAchievements credentials
      */
     public void clearRetroAchievementsCredentials() {
-        mPreferences.edit()
-            .remove(KEY_RA_USERNAME)
-            .remove(KEY_RA_PASSWORD)
-            .remove(KEY_RA_TOKEN)
-            .apply();
+        if (!applySecureEdit(editor -> editor
+                        .remove(KEY_RA_USERNAME)
+                        .remove(KEY_RA_PASSWORD)
+                        .remove(KEY_RA_TOKEN),
+                "credential clear")) {
+            mPreferences.edit().putBoolean(KEY_RA_SECURE_CLEAR_PENDING, true).apply();
+            setRetroAchievementsCredentialsVerified(false);
+            return;
+        }
+        if (mSecurePreferences != mPreferences) {
+            mPreferences.edit()
+                    .remove(KEY_RA_USERNAME)
+                    .remove(KEY_RA_PASSWORD)
+                    .remove(KEY_RA_TOKEN)
+                    .remove(KEY_RA_SECURE_CLEAR_PENDING)
+                    .apply();
+        } else {
+            // Secure prefs unavailable: ensure we clear encrypted store on next recovery.
+            mPreferences.edit().putBoolean(KEY_RA_SECURE_CLEAR_PENDING, true).apply();
+        }
+        setRetroAchievementsCredentialsVerified(false);
     }
 }

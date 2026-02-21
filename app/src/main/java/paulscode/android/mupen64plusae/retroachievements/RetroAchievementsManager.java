@@ -10,6 +10,7 @@ package paulscode.android.mupen64plusae.retroachievements;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.TextUtils;
 import android.util.Log;
 import android.widget.Toast;
 
@@ -18,6 +19,8 @@ import paulscode.android.mupen64plusae.persistent.AppData;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Singleton manager for RetroAchievements integration
@@ -54,12 +57,20 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
     // Pending HTTP requests (callback data ptr -> callback ptr)
     // Using callbackDataPtr as key since it's unique per request
     private final Map<Long, Long> mPendingRequests = new HashMap<>();
+    private final Map<Long, LoginValidationCallback> mPendingLoginValidationCallbacks = new HashMap<>();
     
     /**
      * Callback interface for reading emulator memory
      */
     public interface MemoryReadCallback {
         int readMemory(int address, byte[] buffer, int numBytes);
+    }
+
+    /**
+     * Callback for credential validation requests initiated from preferences.
+     */
+    public interface LoginValidationCallback {
+        void onComplete(boolean success, String errorMessage, String resolvedToken);
     }
 
     /**
@@ -88,6 +99,17 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
     private volatile AchievementEventListener mEventListener;
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
     private String mCurrentGameTitle;
+
+    private static String sanitizeUrlForLog(String url) {
+        if (url == null) {
+            return "null";
+        }
+        int queryIndex = url.indexOf('?');
+        if (queryIndex >= 0) {
+            return url.substring(0, queryIndex) + "?<redacted>";
+        }
+        return url;
+    }
 
     /**
      * Set the achievement event listener (typically GameActivity).
@@ -190,6 +212,14 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
         }
         
         mMemoryReadCallback = null;
+        if (!mPendingLoginValidationCallbacks.isEmpty()) {
+            List<LoginValidationCallback> pendingCallbacks =
+                    new ArrayList<>(mPendingLoginValidationCallbacks.values());
+            mPendingLoginValidationCallbacks.clear();
+            for (LoginValidationCallback callback : pendingCallbacks) {
+                postValidationCallback(callback, false, "RetroAchievements shut down", null);
+            }
+        }
         clearSessionRequestStateLocked();
         mInitialized = false;
         Log.i(TAG, "RetroAchievements shut down");
@@ -236,6 +266,27 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
         // Read from native runtime to avoid stale Java-side state.
         mHardcoreEnabled = mNative.nativeGetHardcoreEnabled(mClientPtr);
         return mHardcoreEnabled;
+    }
+
+    /**
+     * Check if Hardcore restrictions should be enforced right now.
+     * This includes the period where login/game-load is in progress, to avoid
+     * allowing restricted actions before a Hardcore session becomes fully active.
+     */
+    public synchronized boolean isHardcoreRestrictionsActive() {
+        if (!mInitialized || mClientPtr == 0 || !isLoggedIn() || !mHardcoreEnabled) {
+            return false;
+        }
+
+        if (mSessionActive) {
+            mHardcoreEnabled = mNative.nativeGetHardcoreEnabled(mClientPtr);
+            return mHardcoreEnabled;
+        }
+
+        final boolean sessionStarting = mActiveSessionRequestId != 0 && (!mLoginCompleted || !mLoadCompleted);
+        final boolean sessionFailed = (mLoginCompleted && !mLoginSucceeded)
+                || (mLoadCompleted && !mLoadSucceeded);
+        return sessionStarting && !sessionFailed;
     }
     
     /**
@@ -303,7 +354,7 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
         }
 
         try {
-            long requestId = ++mSessionRequestCounter;
+            long requestId = nextRequestIdLocked();
             resetSessionRequestStateLocked(requestId);
 
             boolean loginQueued;
@@ -338,6 +389,47 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
             clearSessionRequestStateLocked();
             return false;
         }
+    }
+
+    /**
+     * Validate credentials without starting a game session.
+     * Used by preferences so credentials are only persisted after successful auth.
+     */
+    public synchronized boolean validateCredentials(String username, String credential, boolean useTokenLogin,
+                                                    LoginValidationCallback callback) {
+        if (!mInitialized || mClientPtr == 0) {
+            postValidationCallback(callback, false, "RetroAchievements is not initialized", null);
+            return false;
+        }
+
+        if (TextUtils.isEmpty(username) || TextUtils.isEmpty(credential)) {
+            postValidationCallback(callback, false, "Username and credential are required", null);
+            return false;
+        }
+
+        final boolean sessionStarting = mActiveSessionRequestId != 0 && (!mLoginCompleted || !mLoadCompleted);
+        if (mSessionActive || sessionStarting) {
+            postValidationCallback(callback, false, "Cannot validate credentials while a game session is active", null);
+            return false;
+        }
+
+        long requestId = nextRequestIdLocked();
+        mPendingLoginValidationCallbacks.put(requestId, callback);
+
+        boolean loginQueued;
+        if (useTokenLogin) {
+            loginQueued = mNative.nativeBeginLoginWithToken(mClientPtr, username, credential, requestId);
+        } else {
+            loginQueued = mNative.nativeBeginLoginWithPassword(mClientPtr, username, credential, requestId);
+        }
+
+        if (!loginQueued) {
+            mPendingLoginValidationCallbacks.remove(requestId);
+            postValidationCallback(callback, false, "Failed to queue login validation request", null);
+            return false;
+        }
+
+        return true;
     }
     
     /**
@@ -440,7 +532,7 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
     
     @Override
     public void onServerCall(String url, String postData, long callbackPtr, long callbackDataPtr) {
-        Log.d(TAG, "Server call: " + url);
+        Log.d(TAG, "Server call: " + sanitizeUrlForLog(url));
         
         // Store pending request using callbackDataPtr as key (unique per request)
         synchronized (mPendingRequests) {
@@ -512,11 +604,10 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
             synchronized (mPendingRequests) {
                 Long storedCallbackPtr = mPendingRequests.remove(callbackDataPtr);
                 if (storedCallbackPtr != null) {
-                    // Use status code 0 to indicate client-side error
                     mNative.nativeServerResponse(
                             storedCallbackPtr,
                             callbackDataPtr,
-                            0,
+                            HTTP_STATUS_RETRYABLE_CLIENT_ERROR,
                             "HTTP client unavailable");
                 }
             }
@@ -525,6 +616,17 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
 
     @Override
     public synchronized void onLoginResult(long requestId, boolean success, String errorMessage) {
+        LoginValidationCallback validationCallback = mPendingLoginValidationCallbacks.remove(requestId);
+        if (validationCallback != null) {
+            if (success) {
+                String resolvedToken = getUserToken();
+                postValidationCallback(validationCallback, true, null, resolvedToken);
+            } else {
+                postValidationCallback(validationCallback, false, errorMessage, null);
+            }
+            return;
+        }
+
         if (!isActiveSessionRequestLocked(requestId)) {
             return;
         }
@@ -535,18 +637,20 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
 
         if (success) {
             Log.i(TAG, "RetroAchievements login succeeded (request " + requestId + ")");
-            // Persist API token so future sessions can use token login
-            if (!mUseTokenLogin) {
-                String token = getUserToken();
-                if (token != null && !token.isEmpty()) {
-                    try {
-                        AppData appData = new AppData(mContext);
+            try {
+                AppData appData = new AppData(mContext);
+
+                // Persist API token so future sessions can use token login
+                if (!mUseTokenLogin) {
+                    String token = getUserToken();
+                    if (!TextUtils.isEmpty(token)) {
                         appData.setRetroAchievementsToken(token);
                         Log.i(TAG, "API token saved for future sessions");
-                    } catch (Exception e) {
-                        Log.w(TAG, "Failed to save API token", e);
                     }
                 }
+                appData.setRetroAchievementsCredentialsVerified(true);
+            } catch (Exception e) {
+                Log.w(TAG, "Failed to update persisted RetroAchievements credentials", e);
             }
         } else {
             Log.w(TAG, "RetroAchievements login failed (request " + requestId + "): " + errorMessage);
@@ -603,6 +707,18 @@ public class RetroAchievementsManager implements RCheevosNative.RCheevosCallback
     private void updateSessionActiveLocked() {
         // A session is active only after both async operations have completed successfully.
         mSessionActive = mLoginCompleted && mLoadCompleted && mLoginSucceeded && mLoadSucceeded;
+    }
+
+    private long nextRequestIdLocked() {
+        return ++mSessionRequestCounter;
+    }
+
+    private void postValidationCallback(LoginValidationCallback callback, boolean success,
+                                        String errorMessage, String resolvedToken) {
+        if (callback == null) {
+            return;
+        }
+        mMainHandler.post(() -> callback.onComplete(success, errorMessage, resolvedToken));
     }
 
     // ========== Save State Serialization ==========

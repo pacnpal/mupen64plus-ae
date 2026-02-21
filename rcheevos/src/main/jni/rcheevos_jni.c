@@ -90,38 +90,62 @@ static void notify_session_callback(const char* method_name, jlong request_id, i
 static uint32_t memory_read_callback(uint32_t address, uint8_t* buffer, uint32_t num_bytes, rc_client_t* client) {
     JNIEnv* env;
     jint result = (*g_jvm)->GetEnv(g_jvm, (void**)&env, JNI_VERSION_1_6);
+    int attached = 0;
+    uint32_t bytes_read_u = 0;
     
     if (result == JNI_EDETACHED) {
         if ((*g_jvm)->AttachCurrentThread(g_jvm, &env, NULL) != 0) {
             LOGE("Failed to attach thread for memory read");
             return 0;
         }
+        attached = 1;
+    } else if (result != JNI_OK) {
+        LOGE("Failed to get JNIEnv for memory read");
+        return 0;
     }
     
     if (g_callback_handler == NULL) {
         LOGE("No callback handler set");
-        return 0;
+        goto memory_read_cleanup;
     }
     
     jclass cls = (*env)->GetObjectClass(env, g_callback_handler);
+    if (cls == NULL) {
+        LOGE("Failed to get callback handler class");
+        goto memory_read_cleanup;
+    }
     jmethodID mid = (*env)->GetMethodID(env, cls, "onMemoryRead", "(I[BI)I");
     
     if (mid == NULL) {
         LOGE("Could not find onMemoryRead method");
-        return 0;
+        (*env)->DeleteLocalRef(env, cls);
+        goto memory_read_cleanup;
     }
     
     jbyteArray jbuffer = (*env)->NewByteArray(env, num_bytes);
+    if (jbuffer == NULL) {
+        LOGE("Failed to allocate memory read buffer");
+        (*env)->DeleteLocalRef(env, cls);
+        goto memory_read_cleanup;
+    }
     jint bytes_read = (*env)->CallIntMethod(env, g_callback_handler, mid, (jint)address, jbuffer, (jint)num_bytes);
     
     if (bytes_read > 0) {
+        if ((uint32_t)bytes_read > num_bytes) {
+            bytes_read = (jint)num_bytes;
+        }
         (*env)->GetByteArrayRegion(env, jbuffer, 0, bytes_read, (jbyte*)buffer);
+        bytes_read_u = (uint32_t)bytes_read;
     }
     
     (*env)->DeleteLocalRef(env, jbuffer);
     (*env)->DeleteLocalRef(env, cls);
-    
-    return (uint32_t)bytes_read;
+
+memory_read_cleanup:
+    if (attached) {
+        (*g_jvm)->DetachCurrentThread(g_jvm);
+    }
+    return bytes_read_u;
 }
 
 // Server callback - will be called by rcheevos to make HTTP requests
@@ -131,26 +155,36 @@ static void server_call_callback(const rc_api_request_t* request,
                                  rc_client_t* client) {
     JNIEnv* env;
     jint result = (*g_jvm)->GetEnv(g_jvm, (void**)&env, JNI_VERSION_1_6);
+    int attached = 0;
     
     if (result == JNI_EDETACHED) {
         if ((*g_jvm)->AttachCurrentThread(g_jvm, &env, NULL) != 0) {
             LOGE("Failed to attach thread for server call");
             return;
         }
+        attached = 1;
+    } else if (result != JNI_OK) {
+        LOGE("Failed to get JNIEnv for server call");
+        return;
     }
     
     if (g_callback_handler == NULL) {
         LOGE("No callback handler set");
-        return;
+        goto server_call_cleanup;
     }
     
     jclass cls = (*env)->GetObjectClass(env, g_callback_handler);
+    if (cls == NULL) {
+        LOGE("Failed to get callback handler class");
+        goto server_call_cleanup;
+    }
     jmethodID mid = (*env)->GetMethodID(env, cls, "onServerCall", 
                                        "(Ljava/lang/String;Ljava/lang/String;JJ)V");
     
     if (mid == NULL) {
         LOGE("Could not find onServerCall method");
-        return;
+        (*env)->DeleteLocalRef(env, cls);
+        goto server_call_cleanup;
     }
     
     jstring jurl = safe_new_string_utf(env, request->url);
@@ -162,6 +196,11 @@ static void server_call_callback(const rc_api_request_t* request,
     (*env)->DeleteLocalRef(env, jurl);
     if (jpost_data) (*env)->DeleteLocalRef(env, jpost_data);
     (*env)->DeleteLocalRef(env, cls);
+
+server_call_cleanup:
+    if (attached) {
+        (*g_jvm)->DetachCurrentThread(g_jvm);
+    }
 }
 
 // Log message callback
