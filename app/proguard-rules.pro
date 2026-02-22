@@ -55,6 +55,7 @@
 -dontwarn org.ietf.jgss.GSSName
 -dontwarn org.ietf.jgss.Oid
 -dontwarn com.google.errorprone.annotations.CanIgnoreReturnValue
+-dontwarn javax.annotation.**
 -dontwarn com.github.luben.zstd.BufferPool
 -dontwarn com.github.luben.zstd.Zstd
 -dontwarn com.github.luben.zstd.ZstdInputStream
